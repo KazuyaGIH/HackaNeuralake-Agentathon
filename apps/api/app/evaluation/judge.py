@@ -1,6 +1,7 @@
-"""Preparacao da entrada do Judge (anonimizacao + embaralhamento com seed) e validacao da saida."""
+﻿"""Preparacao da entrada do Judge (anonimizacao + embaralhamento com seed) e validacao da saida."""
 
 import random
+import re
 from typing import Any
 
 from app.contracts.artifacts import Evaluation, JudgeOutput, Proposal, Verification
@@ -19,7 +20,22 @@ def judge_criteria(rubric: Rubric) -> list[dict[str, Any]]:
     ]
 
 
-def anonymize(proposals: list[Proposal], verifications: dict[str, Verification], seed: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+def _scrub(obj: Any, names: list[str]) -> Any:
+    """Remove nomes de equipes do texto (defesa adicional; nao garante anonimato se o modelo se identificar de outra forma)."""
+    if isinstance(obj, str):
+        out = obj
+        for n in names:
+            if n:
+                out = re.sub(re.escape(n), "[equipe]", out, flags=re.IGNORECASE)
+        return out
+    if isinstance(obj, list):
+        return [_scrub(v, names) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _scrub(v, names) for k, v in obj.items()}
+    return obj
+
+
+def anonymize(proposals: list[Proposal], verifications: dict[str, Verification], seed: int, names: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
     """Retorna (propostas anonimas embaralhadas, verificacoes anonimas, mapa label->candidate_id)."""
     order = sorted(proposals, key=lambda p: p.candidate_id)
     rng = random.Random(seed)
@@ -27,11 +43,12 @@ def anonymize(proposals: list[Proposal], verifications: dict[str, Verification],
     label_map: dict[str, str] = {}
     anon: list[dict[str, Any]] = []
     anon_ver: list[dict[str, Any]] = []
+    scrub_names = sorted((names or {}).values(), key=len, reverse=True)
     for i, p in enumerate(order, start=1):
         label = f"P{i}"
         label_map[label] = p.candidate_id
         data = p.model_dump(mode="json", exclude={"candidate_id", "call_ids", "invalid_evidence_ids", "revised_from_critique", "version"})
-        anon.append({"label": label, **data})
+        anon.append({"label": label, **_scrub(data, scrub_names)})
         v = verifications.get(p.candidate_id)
         if v is not None:
             anon_ver.append(

@@ -139,7 +139,7 @@ class CandidateConfig(BaseModel):
 
     candidate_id: Slug | None = Field(default=None, description="Gerado pelo servidor (c1..c4) se ausente.")
     name: str = Field(min_length=1, max_length=60)
-    preset: Literal["balanced", "cost", "robust"] | None = None
+    preset: Literal["balanced", "cost", "robust", "explorer"] | None = None
     instructions: str = Field(default="", max_length=6000, description="Instrucoes estrategicas privadas do pensante.")
     provider: Provider = Provider.MOCK
     model_option: str = Field(default="mock-default", max_length=64)

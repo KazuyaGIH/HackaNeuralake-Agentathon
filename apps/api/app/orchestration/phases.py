@@ -1,4 +1,4 @@
-"""Fases do fluxo. Regras, limites e validacoes ficam aqui e no coordenador, nunca nos modelos."""
+﻿"""Fases do fluxo. Regras, limites e validacoes ficam aqui e no coordenador, nunca nos modelos."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -403,7 +403,7 @@ async def phase_judge(ctx: RunContext) -> None:
     assert judge_cfg is not None
     proposals = sorted(ctx.proposals.values(), key=lambda p: p.candidate_id)
     ctx.judge_shuffle_seed = (ctx.seed * 7919 + 17) % (2**31)
-    anon, anon_ver, label_map = anonymize(proposals, ctx.verifications, ctx.judge_shuffle_seed)
+    anon, anon_ver, label_map = anonymize(proposals, ctx.verifications, ctx.judge_shuffle_seed, names={c.candidate_id or "": c.name for c in ctx.candidates})
     criteria = judge_criteria(ctx.snapshot.rubric)
     by_cid = {p.candidate_id: p for p in proposals}
 
@@ -488,7 +488,7 @@ async def phase_rank_report(ctx: RunContext) -> Report:
         run_id=ctx.run_id, title=ctx.snapshot.title, status=status, decision_status=ranking.decision_status, simulated=ctx.simulated,
         generated_at=datetime.now(UTC), winner_candidate_id=ranking.winner_candidate_id, co_leaders=ranking.co_leaders,
         decision_reasons=ranking.reasons, ranking=ranking.entries, proposals=sorted(ctx.proposals.values(), key=lambda p: p.candidate_id),
-        critiques=ctx.critiques, verifications=sorted(ctx.verifications.values(), key=lambda v: v.candidate_id),
+        critiques=sorted(ctx.critiques, key=lambda c: c.author_candidate_id), verifications=sorted(ctx.verifications.values(), key=lambda v: v.candidate_id),
         evaluations=sorted(ctx.evaluations.values(), key=lambda e: e.candidate_id),
         evidence_pack_version=ctx.pack.version if ctx.pack else None, evidence_gaps=list(ctx.pack.gaps) if ctx.pack else [],
         limitations=limitations, operational_changes=list(ctx.operational_changes),

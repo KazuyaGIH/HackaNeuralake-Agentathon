@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -69,7 +69,7 @@ async def catalog(request: Request, _owner: Owner) -> CatalogResponse:
 async def _store_source(request: Request, session: Session, owner: str, data: bytes, *, title: str, filename: str | None, declared: str | None) -> Source:
     settings = request.app.state.settings
     if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise _err(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "too_large", f"arquivo excede {settings.max_upload_mb} MiB")
+        raise _err(413, "too_large", f"arquivo excede {settings.max_upload_mb} MiB")
     if not data:
         raise _err(422, "empty", "conteudo vazio")
     try:

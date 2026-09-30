@@ -192,7 +192,6 @@ class MockAdapter:
     def _proposal(self, req: GenerateRequest) -> dict[str, Any]:
         md = req.metadata
         idx = int(md.get("candidate_index", 0))
-        name = md.get("candidate_name", f"Candidato {idx + 1}")
         version = int(md.get("version", 1))
         evidence = self._evidence(md)
         cited = [e["evidence_id"] for e in evidence[idx::max(1, len(evidence) // 4 or 1)]][:4] or [e["evidence_id"] for e in evidence[:3]]
@@ -205,15 +204,16 @@ class MockAdapter:
         metrics = self._metrics_for(md, version)
         critique = md.get("critique")
         revised = version >= 2 and critique is not None
-        strategy = md.get("instructions", "")[:140]
+        approach = ["priorizar equilibrio entre custo, prazo e qualidade", "minimizar custo total respeitando as restricoes",
+                    "priorizar privacidade e robustez", "explorar alternativa nao convencional"][idx % 4]
         rec = (
-            f"{SEAL} Recomendacao da equipe {name} (v{version}) para: {md.get('objective', '')[:200]}. "
-            f"Abordagem: {strategy or 'equilibrio entre custo, prazo e qualidade'}. "
+            f"{SEAL} Recomendacao (v{version}) para: {md.get('objective', '')[:200]}. "
+            f"Abordagem: {approach}. "
             + (f"Revisada apos critica: {len(critique.get('objections', []))} objecao(oes) consideradas. " if revised else "")
             + "Os valores citados vem exclusivamente do pacote comum de evidencias."
         )
         return {
-            "title": f"{SEAL} Proposta {name} v{version}",
+            "title": f"{SEAL} Proposta v{version}: {approach}",
             "recommendation": rec,
             "steps": [f"{SEAL} Passo 1: consolidar requisitos a partir das evidencias", f"{SEAL} Passo 2: validar restricoes obrigatorias com dados citados",
                       f"{SEAL} Passo 3: plano de implantacao em fases", f"{SEAL} Passo 4: medir resultados e revisar"],
