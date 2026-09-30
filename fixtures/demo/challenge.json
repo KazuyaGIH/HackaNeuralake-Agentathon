@@ -1,0 +1,50 @@
+{
+  "title": "[DEMO SIMULADA] Arquitetura do chatbot interno — Lumina Ferramentas (ficticia)",
+  "objective": "Escolher a arquitetura do chatbot interno da Lumina Ferramentas (empresa ficticia) que atenda ao custo mensal maximo, ao prazo de implantacao do piloto e as regras de privacidade, com qualidade aceitavel de respostas sobre documentos internos.",
+  "context": "Cenario sintetico de demonstracao. Tres opcoes foram levantadas pela equipe tecnica (SaaS pronto, RAG com API em nuvem e modelo aberto auto-hospedado). Os documentos anexos trazem requisitos, opcoes, precos e a politica de privacidade. Todos os valores sao ficticios.",
+  "documents": ["01_requisitos_chatbot.md", "02_opcoes_arquitetura.md", "03_politica_privacidade.md"],
+  "constraints": [
+    {
+      "constraint_id": "custo_mensal_max",
+      "description": "Custo mensal recorrente maximo apos a implantacao",
+      "kind": "numeric_max",
+      "metric_key": "monthly_cost_brl",
+      "limit": "8000",
+      "unit": "BRL",
+      "mandatory": true
+    },
+    {
+      "constraint_id": "prazo_piloto_max",
+      "description": "Prazo maximo de implantacao do piloto",
+      "kind": "numeric_max",
+      "metric_key": "delivery_days",
+      "limit": "90",
+      "unit": "dias",
+      "mandatory": true
+    },
+    {
+      "constraint_id": "privacidade_dados",
+      "description": "Dados internos nao podem treinar modelos de terceiros; preferencia por processamento no Brasil",
+      "kind": "qualitative",
+      "mandatory": false
+    }
+  ],
+  "budget": {
+    "currency": "USD",
+    "total_cap": "1.00",
+    "strict": true,
+    "common_share_pct": "30",
+    "max_total_calls": 32,
+    "max_concurrent_calls": 2,
+    "run_deadline_s": 300,
+    "call_timeout_s": 60,
+    "max_attempts_per_call": 2
+  },
+  "mode": "mock",
+  "config_mode": "auto",
+  "candidate_count": 2,
+  "critique_rounds": 1,
+  "seed": 20260930,
+  "mock_scenario": "default",
+  "tags": ["demo", "simulado"]
+}
