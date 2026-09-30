@@ -222,7 +222,7 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
 
 ## Pendências e limitações conhecidas
 
-- **Teste real NeuraLake pendente** (sem credencial). Compatibilidade de parâmetros/usage/`auto` não confirmada.
+- **Teste real NeuraLake pendente** (sem credencial). Compatibilidade de parâmetros/usage/`auto` não confirmada. Sem teste por API
 - Docker Compose não executado nesta máquina.
 - Sem OCR; PDFs digitalizados são rejeitados com explicação.
 - UI apenas para uso local (sem sessão autenticada/CSRF); para rede, usar clientes com token.
