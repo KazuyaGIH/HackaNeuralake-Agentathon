@@ -32,7 +32,11 @@ class Settings(BaseSettings):
     # NeuraLake (somente backend; nunca enviado ao frontend)
     neuralake_api_key: str | None = None
     neuralake_base_url: str = "https://api.neuralake.cloud/v1"
-    neuralake_prices_file: Path | None = None
+    neuralake_json_mode: bool = Field(default=False, description="Envia response_format=json_object (compatibilidade nao confirmada).")
+    neuralake_prices_file: Path | None = Field(
+        default=REPO_DIR / "fixtures" / "prices" / "neuralake.public-2026-09-30.json",
+        description="Tabela de precos versionada. Default: pagina publica de precos (estimativa, nao fatura).",
+    )
 
     @property
     def db_url(self) -> str:

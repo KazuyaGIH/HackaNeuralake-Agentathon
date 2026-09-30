@@ -29,6 +29,7 @@ class GenerateRequest(BaseModel):
     seed: int
     attempt: int = 1
     repair_of: str | None = Field(default=None, description="Conteudo invalido anterior, quando for reparacao.")
+    repair_error: str | None = Field(default=None, description="Motivo da invalidez anterior (schema/semantica).")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Contexto estruturado (usado pelo mock).")
 
     def prompt_chars(self) -> int:

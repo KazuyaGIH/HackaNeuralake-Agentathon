@@ -1,4 +1,4 @@
-"""Coordenador em codigo: unico componente que autoriza chamadas, aplica limites, persiste e emite eventos."""
+﻿"""Coordenador em codigo: unico componente que autoriza chamadas, aplica limites, persiste e emite eventos."""
 
 import asyncio
 import json
@@ -208,6 +208,7 @@ class RunContext:
         max_attempts = self.snapshot.budget.max_attempts_per_call
         call_ids: list[str] = []
         repair_of: str | None = None
+        repair_error: str | None = None
         last_error = ("unknown", "sem tentativas")
         json_schema = schema.model_json_schema()
         metadata = {**metadata, "scenario": self.snapshot.mock_scenario, "seed": self.seed}
@@ -219,7 +220,7 @@ class RunContext:
                 role=role, stage=stage, candidate_id=candidate_id, option=option, system=system, user=user,
                 schema_name=_schema_name(schema), json_schema=json_schema, max_output_tokens=max_output_tokens,
                 timeout_s=min(self.snapshot.budget.call_timeout_s, max(1.0, self.remaining_s())), seed=self.seed,
-                attempt=attempt, repair_of=repair_of, metadata=metadata,
+                attempt=attempt, repair_of=repair_of, repair_error=repair_error, metadata=metadata,
             )
             try:
                 plan = self.ledger.plan(provider, option, req.prompt_chars(), max_output_tokens, NEURALAKE_OPTIONS)
@@ -287,6 +288,7 @@ class RunContext:
             last_error = ("schema_invalid", schema_error)
             if attempt < max_attempts and not self.halted:
                 repair_of = result.content[:6000]
+                repair_error = schema_error[:500]
                 continue
             raise CallFailed(f"resposta invalida: {schema_error}", "schema_invalid", call_ids)
         raise CallFailed(last_error[1], last_error[0], call_ids)
@@ -398,5 +400,5 @@ def make_adapters(settings: Settings, catalog: Catalog) -> dict[str, ProviderAda
     if catalog.provider_enabled(Provider.NEURALAKE):
         from app.providers.neuralake import NeuraLakeAdapter
 
-        adapters[Provider.NEURALAKE] = NeuraLakeAdapter(api_key=settings.neuralake_api_key or "", base_url=settings.neuralake_base_url)
+        adapters[Provider.NEURALAKE] = NeuraLakeAdapter(api_key=settings.neuralake_api_key or "", base_url=settings.neuralake_base_url, json_mode=settings.neuralake_json_mode)
     return adapters
