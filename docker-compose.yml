@@ -1,0 +1,41 @@
+# Execucao local com Docker Compose (NAO verificado neste ambiente: Docker indisponivel; ver README > Pendencias).
+# Portas publicadas apenas em 127.0.0.1. O backend em modo local confia nos clientes da rede do Compose
+# (AGENTATHON_AUTH_LOCAL_TRUST_ANY_CLIENT=true) porque a exposicao externa e bloqueada pelo bind em loopback.
+# Para expor em rede, use AGENTATHON_AUTH_MODE=token e HTTPS em um proxy.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AGENTATHON_DATA_DIR: /data
+      AGENTATHON_HOST: 0.0.0.0
+      AGENTATHON_AUTH_LOCAL_TRUST_ANY_CLIENT: "true"
+      AGENTATHON_CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+    volumes:
+      - agentathon-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  agentathon-data:

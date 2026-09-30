@@ -27,3 +27,6 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+apps/web/tsconfig.tsbuildinfo
+

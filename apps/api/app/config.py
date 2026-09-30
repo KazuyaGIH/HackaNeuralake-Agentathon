@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Autenticacao: "local" = workspace unico sem token (somente loopback); "token" = Bearer obrigatorio.
     auth_mode: str = "local"
     api_tokens: str = Field(default="", description="Formato: token1:owner1,token2:owner2")
+    auth_local_trust_any_client: bool = Field(
+        default=False,
+        description="Modo local atras de Docker/proxy em loopback: aceita clientes fora de 127.0.0.1. Nunca use exposto em rede.",
+    )
 
     # Limites do servidor
     max_upload_mb: int = 10

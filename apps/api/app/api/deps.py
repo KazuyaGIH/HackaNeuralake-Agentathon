@@ -29,7 +29,7 @@ def current_owner(request: Request, settings: Annotated[Settings, Depends(get_se
     """Local: workspace unico, apenas loopback. Token: Bearer obrigatorio (nunca em query string)."""
     if settings.auth_mode == "local":
         host = request.client.host if request.client else "127.0.0.1"
-        if host not in LOOPBACK:
+        if host not in LOOPBACK and not settings.auth_local_trust_any_client:
             raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "loopback_only", "message": "modo local aceita apenas conexoes de loopback; configure AGENTATHON_AUTH_MODE=token para exposicao em rede"})
         return LOCAL_OWNER
     auth = request.headers.get("authorization", "")
