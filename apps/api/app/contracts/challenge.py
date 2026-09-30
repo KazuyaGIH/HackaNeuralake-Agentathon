@@ -1,9 +1,9 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
-from app.contracts.common import ConstraintKind, ExecutionMode, Money, Provider, Slug, SpecialistKind
+from app.contracts.common import ContractModel, ConstraintKind, ExecutionMode, Money, Provider, Slug, SpecialistKind
 
 MAX_CANDIDATES = 4
 MIN_CANDIDATES = 2
@@ -17,7 +17,7 @@ MAX_CRITIQUE_ROUNDS = 1
 EFFICIENCY_CRITERION_ID = "efficiency"
 
 
-class RubricCriterion(BaseModel):
+class RubricCriterion(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     criterion_id: Slug
@@ -27,7 +27,7 @@ class RubricCriterion(BaseModel):
     computed_by: Literal["judge", "server_efficiency"] = "judge"
 
 
-class Rubric(BaseModel):
+class Rubric(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     criteria: list[RubricCriterion] = Field(min_length=1, max_length=12)
@@ -93,7 +93,7 @@ def default_rubric() -> Rubric:
     )
 
 
-class Constraint(BaseModel):
+class Constraint(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     constraint_id: Slug
@@ -118,7 +118,7 @@ class Constraint(BaseModel):
         return self.kind != ConstraintKind.QUALITATIVE
 
 
-class BudgetConfig(BaseModel):
+class BudgetConfig(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
@@ -134,7 +134,7 @@ class BudgetConfig(BaseModel):
     max_attempts_per_call: int = Field(default=MAX_ATTEMPTS, ge=1, le=MAX_ATTEMPTS)
 
 
-class CandidateConfig(BaseModel):
+class CandidateConfig(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: Slug | None = Field(default=None, description="Gerado pelo servidor (c1..c4) se ausente.")
@@ -152,7 +152,7 @@ class CandidateConfig(BaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
-class JudgeConfig(BaseModel):
+class JudgeConfig(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Provider = Provider.MOCK
@@ -160,7 +160,7 @@ class JudgeConfig(BaseModel):
     max_output_tokens: int = Field(default=3000, ge=300, le=8000)
 
 
-class ChallengeConfig(BaseModel):
+class ChallengeConfig(ContractModel):
     """Configuracao completa de um desafio. Depois de validada e resolvida vira o snapshot imutavel do Run."""
 
     model_config = ConfigDict(extra="forbid")

@@ -1,13 +1,13 @@
-from datetime import datetime
+﻿from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from app.contracts.challenge import ChallengeConfig
-from app.contracts.common import CostQuality, DecisionStatus, ExecutionMode, Money, Provider, RunStatus, UsageQuality
+from app.contracts.common import ContractModel, CostQuality, DecisionStatus, ExecutionMode, Money, Provider, RunStatus, UsageQuality
 
 
-class SourceCreateResponse(BaseModel):
+class SourceCreateResponse(ContractModel):
     source_id: str
     title: str
     media_type: str
@@ -19,7 +19,7 @@ class SourceCreateResponse(BaseModel):
     warnings: list[str]
 
 
-class CatalogModelOption(BaseModel):
+class CatalogModelOption(ContractModel):
     provider: Provider
     option: str
     label: str
@@ -36,7 +36,7 @@ class CatalogModelOption(BaseModel):
     unavailable_reason: str | None = None
 
 
-class CatalogPreset(BaseModel):
+class CatalogPreset(ContractModel):
     preset: str
     label: str
     description: str
@@ -46,7 +46,7 @@ class CatalogPreset(BaseModel):
     max_specialist_tasks: int
 
 
-class CatalogResponse(BaseModel):
+class CatalogResponse(ContractModel):
     app_version: str
     catalog_version: str
     modes: list[ExecutionMode]
@@ -60,14 +60,14 @@ class CatalogResponse(BaseModel):
     demo_preset_available: bool
 
 
-class RunCreateResponse(BaseModel):
+class RunCreateResponse(ContractModel):
     run_id: str
     status: RunStatus
     created: bool
     links: dict[str, str]
 
 
-class RunSummary(BaseModel):
+class RunSummary(ContractModel):
     run_id: str
     title: str | None
     status: RunStatus
@@ -81,7 +81,7 @@ class RunSummary(BaseModel):
     simulated: bool
 
 
-class BudgetBucketView(BaseModel):
+class BudgetBucketView(ContractModel):
     bucket_key: str
     cap: Money | None
     spent: Money
@@ -92,7 +92,7 @@ class BudgetBucketView(BaseModel):
     calls_provisioned: int
 
 
-class CallUsageView(BaseModel):
+class CallUsageView(ContractModel):
     call_id: str
     logical_call_id: str
     attempt: int
@@ -115,7 +115,7 @@ class CallUsageView(BaseModel):
     created_at: datetime
 
 
-class RunEventView(BaseModel):
+class RunEventView(ContractModel):
     seq: int
     type: str
     ts: datetime
@@ -123,7 +123,7 @@ class RunEventView(BaseModel):
     payload: dict[str, Any]
 
 
-class RunMetrics(BaseModel):
+class RunMetrics(ContractModel):
     calls_used: int
     calls_cap: int
     spent: Money
@@ -136,7 +136,7 @@ class RunMetrics(BaseModel):
     deadline_s: int
 
 
-class RunDetail(BaseModel):
+class RunDetail(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str

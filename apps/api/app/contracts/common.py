@@ -2,7 +2,13 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+
+
+class ContractModel(BaseModel):
+    """Base dos contratos: no schema de saida, campos com default sao obrigatorios (tipos gerados sem opcionais espurios)."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
 
 def _money_str(value: Decimal) -> str:

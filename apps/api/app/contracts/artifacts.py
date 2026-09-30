@@ -1,11 +1,12 @@
-from datetime import datetime
+﻿from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from app.contracts.common import (
     CheckResult,
+    ContractModel,
     CostQuality,
     DecisionStatus,
     Eligibility,
@@ -18,7 +19,7 @@ from app.contracts.common import (
 # ----------------------------------------------------------------------------- evidencias
 
 
-class EvidenceLocator(BaseModel):
+class EvidenceLocator(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     page: int | None = None
@@ -27,7 +28,7 @@ class EvidenceLocator(BaseModel):
     line_end: int | None = None
 
 
-class CalcInput(BaseModel):
+class CalcInput(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=64)
@@ -36,7 +37,7 @@ class CalcInput(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list, max_length=8)
 
 
-class Derivation(BaseModel):
+class Derivation(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     function: str
@@ -47,7 +48,7 @@ class Derivation(BaseModel):
     input_evidence_ids: list[str]
 
 
-class EvidenceItem(BaseModel):
+class EvidenceItem(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     evidence_id: str
@@ -59,7 +60,7 @@ class EvidenceItem(BaseModel):
     derivation: Derivation | None = None
 
 
-class SourceSummary(BaseModel):
+class SourceSummary(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     source_id: str
@@ -72,7 +73,7 @@ class SourceSummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class EvidencePack(BaseModel):
+class EvidencePack(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
@@ -91,7 +92,7 @@ class EvidencePack(BaseModel):
 # ----------------------------------------------------------------------------- planejamento e delegacao
 
 
-class CalculationSpec(BaseModel):
+class CalculationSpec(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     function: str = Field(min_length=1, max_length=64)
@@ -99,7 +100,7 @@ class CalculationSpec(BaseModel):
     unit: str = Field(min_length=1, max_length=32)
 
 
-class SpecialistTask(BaseModel):
+class SpecialistTask(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -111,7 +112,7 @@ class SpecialistTask(BaseModel):
     depends_on: list[str] = Field(default_factory=list, max_length=2)
 
 
-class ThinkerPlanOutput(BaseModel):
+class ThinkerPlanOutput(ContractModel):
     """Saida estruturada esperada do pensante na fase de planejamento."""
 
     model_config = ConfigDict(extra="forbid")
@@ -120,14 +121,14 @@ class ThinkerPlanOutput(BaseModel):
     tasks: list[SpecialistTask] = Field(default_factory=list, max_length=6)
 
 
-class PlanRejection(BaseModel):
+class PlanRejection(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str
     reason: str
 
 
-class PlanValidation(BaseModel):
+class PlanValidation(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     accepted_task_ids: list[str]
@@ -135,7 +136,7 @@ class PlanValidation(BaseModel):
     adjusted: bool
 
 
-class TaskPlan(BaseModel):
+class TaskPlan(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
@@ -144,7 +145,7 @@ class TaskPlan(BaseModel):
     validation: PlanValidation
 
 
-class Finding(BaseModel):
+class Finding(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     claim: str = Field(max_length=1000)
@@ -152,14 +153,14 @@ class Finding(BaseModel):
     confidence: Literal["low", "medium", "high"] = "medium"
 
 
-class ResearchOutput(BaseModel):
+class ResearchOutput(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     findings: list[Finding] = Field(default_factory=list, max_length=12)
     gaps: list[str] = Field(default_factory=list, max_length=8)
 
 
-class TaskResult(BaseModel):
+class TaskResult(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str
@@ -176,7 +177,7 @@ class TaskResult(BaseModel):
 # ----------------------------------------------------------------------------- propostas e critica
 
 
-class ProposalMetric(BaseModel):
+class ProposalMetric(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     value: Money
@@ -184,7 +185,7 @@ class ProposalMetric(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list, max_length=8)
 
 
-class ProposalOutput(BaseModel):
+class ProposalOutput(ContractModel):
     """Saida estruturada do pensante ao consolidar/revisar a proposta."""
 
     model_config = ConfigDict(extra="forbid")
@@ -208,7 +209,7 @@ class Proposal(ProposalOutput):
     call_ids: list[str] = Field(default_factory=list)
 
 
-class Objection(BaseModel):
+class Objection(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     point: str = Field(max_length=1000)
@@ -217,7 +218,7 @@ class Objection(BaseModel):
     constraint_id: str | None = None
 
 
-class CritiqueOutput(BaseModel):
+class CritiqueOutput(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     objections: list[Objection] = Field(default_factory=list, max_length=12)
@@ -234,7 +235,7 @@ class Critique(CritiqueOutput):
 # ----------------------------------------------------------------------------- verificacao e avaliacao
 
 
-class ConstraintCheck(BaseModel):
+class ConstraintCheck(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     constraint_id: str
@@ -246,7 +247,7 @@ class ConstraintCheck(BaseModel):
     reason: str
 
 
-class Verification(BaseModel):
+class Verification(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
@@ -258,7 +259,7 @@ class Verification(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
-class CriterionGrade(BaseModel):
+class CriterionGrade(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     criterion_id: str
@@ -267,7 +268,7 @@ class CriterionGrade(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list, max_length=8)
 
 
-class JudgeProposalEvaluation(BaseModel):
+class JudgeProposalEvaluation(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str = Field(description="Rotulo anonimo da proposta (ex.: P1).")
@@ -277,13 +278,13 @@ class JudgeProposalEvaluation(BaseModel):
     uncertainties: list[str] = Field(default_factory=list, max_length=12)
 
 
-class JudgeOutput(BaseModel):
+class JudgeOutput(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     evaluations: list[JudgeProposalEvaluation]
 
 
-class Evaluation(BaseModel):
+class Evaluation(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
@@ -302,7 +303,7 @@ class Evaluation(BaseModel):
 # ----------------------------------------------------------------------------- ranking e relatorio
 
 
-class EfficiencyInfo(BaseModel):
+class EfficiencyInfo(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     cost: Money | None
@@ -311,7 +312,7 @@ class EfficiencyInfo(BaseModel):
     cost_quality: CostQuality
 
 
-class RankingEntry(BaseModel):
+class RankingEntry(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
@@ -327,7 +328,7 @@ class RankingEntry(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class CostBreakdown(BaseModel):
+class CostBreakdown(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     currency: str
@@ -343,7 +344,7 @@ class CostBreakdown(BaseModel):
     strict: bool
 
 
-class Report(BaseModel):
+class Report(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str

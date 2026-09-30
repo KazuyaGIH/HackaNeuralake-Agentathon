@@ -303,7 +303,7 @@ async def retry_run(request: Request, session: Session, owner: Owner, run_id: st
     return RunCreateResponse(run_id=new_run.id, status=RunStatus(new_run.status), created=True, links=_links(request, new_run.id))
 
 
-@api.get("/runs/{run_id}/report")
+@api.get("/runs/{run_id}/report", responses={200: {"model": Report, "content": {"application/json": {}, "text/markdown": {"schema": {"type": "string"}}}}})
 async def run_report(session: Session, owner: Owner, run_id: str, format: Literal["json", "md"] = "json") -> Response:
     run = await _owned_run(session, owner, run_id)
     arts = [a for a in await list_artifacts(session, run_id) if a.kind == "report"]
