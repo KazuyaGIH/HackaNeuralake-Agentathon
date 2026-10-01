@@ -268,9 +268,19 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
         </Link>
         <div className="side-project">
           <div className="side-avatar">{(projectName(project).match(/[\p{L}\p{N}]/u)?.[0] ?? "P").toUpperCase()}</div>
-          <div className="side-project-name" title={projectName(project)}>
-            {projectName(project)}
-          </div>
+          {editing === "__project" ? (
+            <form className="side-edit project" onSubmit={(e) => (e.preventDefault(), update({ title: editValue.trim() || cfg.title }), setEditing(null))}>
+              <input
+                autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                onBlur={() => (update({ title: editValue.trim() || cfg.title }), setEditing(null))} onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+              />
+            </form>
+          ) : (
+            <button className="side-project-name" title="Clique para renomear o projeto" onClick={() => (setEditing("__project"), setEditValue(projectName(project)))}>
+              <span>{projectName(project)}</span>
+              <Icon name="edit" size={12} />
+            </button>
+          )}
         </div>
         <button className="primary block" onClick={startArena} disabled={busy || !catalog || problems.length > 0} title={problems.join("\n")}>
           <Icon name="play" size={14} /> Iniciar arena

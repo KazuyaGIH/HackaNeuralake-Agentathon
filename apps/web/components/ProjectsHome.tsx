@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { api, type RunSummary } from "@/lib/api";
 import { STATUS_LABEL, ago } from "@/lib/format";
-import { createProject, emptyConfig, loadProjects, projectName, type Project } from "@/lib/projects";
+import { createProject, deleteProject, emptyConfig, loadProjects, projectName, saveProject, type Project } from "@/lib/projects";
 import Icon from "./Icon";
 
 const STATUS_CLASS: Record<string, string> = { completed: "ok", partial: "warn", failed: "bad", cancelled: "info", interrupted: "bad", running: "accent", queued: "info" };
@@ -17,11 +17,36 @@ export default function ProjectsHome() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   useEffect(() => {
     setProjects(loadProjects());
     api.listRuns().then(setRuns).catch(() => setRuns([]));
   }, []);
+
+  const refresh = () => setProjects(loadProjects());
+
+  function rename(p: Project) {
+    const title = editValue.trim();
+    if (title && title !== projectName(p)) saveProject({ ...p, config: { ...p.config, title } });
+    setEditing(null);
+    refresh();
+  }
+
+  function duplicate(p: Project) {
+    const copy = createProject({ ...p.config, title: `${projectName(p)} (cópia)` }, p.sources);
+    refresh();
+    setEditing(copy.id);
+    setEditValue(projectName(copy));
+  }
+
+  function remove(p: Project) {
+    deleteProject(p.id);
+    setConfirmDel(null);
+    refresh();
+  }
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -99,11 +124,36 @@ export default function ProjectsHome() {
               const mine = runs.filter((r) => p.runIds.includes(r.run_id)).sort((a, b) => b.created_at.localeCompare(a.created_at));
               const last = mine[0];
               const teams = p.config.config_mode === "manual" ? (p.config.candidates?.length ?? 0) : (p.config.candidate_count ?? 2);
+              if (confirmDel === p.id)
+                return (
+                  <div key={p.id} className="repo repo-confirm">
+                    <div className="repo-main">
+                      <strong>Excluir “{projectName(p)}”?</strong>
+                      <p className="repo-desc">O projeto sai da lista. As arenas já executadas continuam no Histórico.</p>
+                    </div>
+                    <div className="row">
+                      <button onClick={() => setConfirmDel(null)}>Cancelar</button>
+                      <button className="danger solid" onClick={() => remove(p)}>
+                        <Icon name="trash" /> Excluir
+                      </button>
+                    </div>
+                  </div>
+                );
               return (
-                <Link key={p.id} href={`/projetos/${p.id}`} className="repo">
+                <div key={p.id} className="repo">
+                  <Link href={`/projetos/${p.id}`} className="repo-link" onClick={(e) => editing === p.id && e.preventDefault()}>
                   <div className="repo-main">
                     <div className="repo-title">
-                      <span>{projectName(p)}</span>
+                      {editing === p.id ? (
+                        <form className="repo-rename" onSubmit={(e) => (e.preventDefault(), rename(p))} onClick={(e) => e.preventDefault()}>
+                          <input
+                            autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => rename(p)}
+                            onKeyDown={(e) => e.key === "Escape" && setEditing(null)} onClick={(e) => e.stopPropagation()}
+                          />
+                        </form>
+                      ) : (
+                        <span>{projectName(p)}</span>
+                      )}
                       <span className={`badge ${p.config.mode === "real" ? "accent" : "seal"}`}>{p.config.mode === "real" ? "REAL" : "SIMULADO"}</span>
                     </div>
                     <p className="repo-desc">{p.config.objective || "Sem objetivo definido ainda."}</p>
@@ -124,7 +174,19 @@ export default function ProjectsHome() {
                     {last ? <span className={`badge ${STATUS_CLASS[last.status] ?? "info"}`}>Última arena: {STATUS_LABEL[last.status] ?? last.status}</span> : <span className="muted small">Nenhuma arena</span>}
                     <Icon name="chevron" />
                   </div>
-                </Link>
+                  </Link>
+                  <div className="repo-actions">
+                    <button className="icon-btn" title="Renomear" onClick={() => (setEditing(p.id), setEditValue(projectName(p)))}>
+                      <Icon name="edit" size={15} />
+                    </button>
+                    <button className="icon-btn" title="Duplicar" onClick={() => duplicate(p)}>
+                      <Icon name="folder" size={15} />
+                    </button>
+                    <button className="icon-btn danger-icon" title="Excluir" onClick={() => setConfirmDel(p.id)}>
+                      <Icon name="trash" size={15} />
+                    </button>
+                  </div>
+                </div>
               );
             })}
             {visible.length === 0 && <p className="muted" style={{ padding: 16 }}>Nenhum projeto encontrado para “{query}”.</p>}
