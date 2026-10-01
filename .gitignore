@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Dados locais (banco SQLite, anexos)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Segredos
+.env
+.env.local
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+npm-debug.log*
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+apps/web/tsconfig.tsbuildinfo
+

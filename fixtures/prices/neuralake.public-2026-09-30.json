@@ -1,0 +1,13 @@
+{
+  "version": "neuralake-public-page-2026-09-30",
+  "currency": "USD",
+  "source": "https://www.neuralake.com.br/pricing.html consultada em 30/09/2026; nao confirmada no ambiente nem em fatura",
+  "notes": "model=auto cobra a tarifa da capacidade escolhida pelo roteador; o sistema reserva pelo teto entre as rotas permitidas.",
+  "neuralake": {
+    "text": {"input_per_1m": "0.50", "output_per_1m": "0.75"},
+    "code": {"input_per_1m": "1.00", "output_per_1m": "1.00"},
+    "reasoning": {"input_per_1m": "2.00", "output_per_1m": "4.00"},
+    "reasoning-pro": {"input_per_1m": "2.00", "output_per_1m": "4.50"},
+    "multimodal": {"input_per_1m": "1.50", "output_per_1m": "1.50"}
+  }
+}
