@@ -18,6 +18,7 @@ export type RunSummary = components["schemas"]["RunSummary"];
 export type RunEventView = components["schemas"]["RunEventView"];
 export type Report = components["schemas"]["Report"];
 export type Proposal = components["schemas"]["Proposal"];
+export type ActionPlan = components["schemas"]["ActionPlan"];
 export type SourceCreateResponse = components["schemas"]["SourceCreateResponse"];
 export type RunCreateResponse = components["schemas"]["RunCreateResponse"];
 
@@ -84,6 +85,15 @@ export const api = {
   report: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}/report?format=json`, { cache: "no-store" }).then((r) => handle<Report>(r)),
   cancel: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}/cancel`, { method: "POST" }).then((r) => handle<{ status: string; changed: boolean }>(r)),
   retry: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}/retry`, { method: "POST" }).then((r) => handle<RunCreateResponse>(r)),
+  refine: (id: string, feedback: { candidate_id: string; comment: string }[], generalComment: string) =>
+    fetch(`${API_BASE}/api/v1/runs/${id}/refine`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feedback, general_comment: generalComment }) }).then((r) =>
+      handle<RunCreateResponse>(r),
+    ),
+  actionPlan: (id: string, candidateId: string | null, instructions: string) =>
+    fetch(`${API_BASE}/api/v1/runs/${id}/action-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: candidateId, instructions }) }).then((r) =>
+      handle<RunCreateResponse>(r),
+    ),
+  deleteRun: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}`, { method: "DELETE" }).then((r) => (r.status === 404 ? null : handle<null>(r))),
   reportUrl: (id: string, format: "json" | "md") => `${API_BASE}/api/v1/runs/${id}/report?format=${format}`,
   eventsUrl: (id: string, after = 0) => `${API_BASE}/api/v1/runs/${id}/events?after=${after}`,
 };

@@ -10,6 +10,21 @@ from app.contracts.common import CheckResult, ConstraintKind, Eligibility, Evide
 _NUM = re.compile(r"\d[\d.,]*")
 
 
+def fmt_value(value: Decimal, unit: str | None) -> str:
+    """Valor legivel para mensagens: 8000 BRL -> R$ 8.000; 90 dias -> 90 dias."""
+    if value == value.to_integral_value():
+        num = f"{int(value):,}".replace(",", ".")
+    else:
+        whole, frac = f"{value:.2f}".split(".")
+        num = f"{int(whole):,}".replace(",", ".") + "," + frac
+    u = (unit or "").strip()
+    if u.upper() == "BRL":
+        return f"R$ {num}"
+    if u.upper() == "USD":
+        return f"US$ {num}"
+    return f"{num} {u}".strip()
+
+
 def _numbers_in(text: str) -> set[Decimal]:
     out: set[Decimal] = set()
     for m in _NUM.findall(text):
@@ -33,11 +48,11 @@ def _metric_supported(value: Decimal, evidence_ids: list[str], pack: EvidencePac
             continue
         if item.type == EvidenceType.DERIVED_CALCULATION and item.derivation is not None:
             if item.derivation.result == value:
-                return True, f"derivacao {eid} ({item.derivation.formula}) = {value}"
+                return True, f"comprovado pelo cálculo {eid}"
         elif item.type == EvidenceType.SOURCE_CLAIM:
             if value in _numbers_in(item.excerpt):
-                return True, f"trecho {eid} contem o valor {value}"
-    return False, "nenhuma evidencia citada sustenta o valor declarado"
+                return True, f"comprovado pelo trecho {eid}"
+    return False, "nenhuma evidência citada comprova o valor declarado"
 
 
 def check_constraint(constraint: Constraint, proposal: Proposal, pack: EvidencePack) -> ConstraintCheck:
@@ -45,33 +60,34 @@ def check_constraint(constraint: Constraint, proposal: Proposal, pack: EvidenceP
     if constraint.kind == ConstraintKind.QUALITATIVE:
         return ConstraintCheck(
             **base, unit=constraint.unit, result=CheckResult.UNKNOWN,
-            reason="restricao sem verificador objetivo: avaliacao semantica nao satisfaz restricao obrigatoria verificavel",
+            reason="regra qualitativa: não há verificação automática, então fica sem prova",
         )
     metric = proposal.metrics.get(constraint.metric_key or "")
     if metric is None:
         return ConstraintCheck(
             **base, unit=constraint.unit, result=CheckResult.UNKNOWN,
-            reason=f"proposta nao declara a metrica '{constraint.metric_key}'",
+            reason="a proposta não informa este valor",
         )
     if metric.unit.strip().lower() != (constraint.unit or "").strip().lower():
         return ConstraintCheck(
             **base, result=CheckResult.UNKNOWN, observed_value=metric.value, unit=metric.unit,
             evidence_ids=metric.evidence_ids,
-            reason=f"unidade declarada '{metric.unit}' difere da unidade da restricao '{constraint.unit}'",
+            reason=f"unidade informada ({metric.unit}) diferente da exigida pela regra ({constraint.unit})",
         )
     supported, why = _metric_supported(metric.value, metric.evidence_ids, pack)
     if not supported:
         return ConstraintCheck(
             **base, result=CheckResult.UNKNOWN, observed_value=metric.value, unit=metric.unit,
-            evidence_ids=metric.evidence_ids, reason=f"valor nao verificavel: {why}",
+            evidence_ids=metric.evidence_ids, reason=f"{fmt_value(metric.value, metric.unit)} informado, mas {why}",
         )
     limit = constraint.limit or Decimal("0")
     ok = metric.value <= limit if constraint.kind == ConstraintKind.NUMERIC_MAX else metric.value >= limit
-    op = "<=" if constraint.kind == ConstraintKind.NUMERIC_MAX else ">="
+    bound = "máximo" if constraint.kind == ConstraintKind.NUMERIC_MAX else "mínimo"
+    verdict = "dentro do" if ok else ("acima do" if constraint.kind == ConstraintKind.NUMERIC_MAX else "abaixo do")
     return ConstraintCheck(
         **base, result=CheckResult.PASS if ok else CheckResult.FAIL, observed_value=metric.value, unit=metric.unit,
         evidence_ids=metric.evidence_ids,
-        reason=f"{metric.value} {op} {limit} {constraint.unit}: {'ok' if ok else 'violado'} ({why})",
+        reason=f"{fmt_value(metric.value, metric.unit)}: {verdict} {bound} de {fmt_value(limit, constraint.unit)} ({why})",
     )
 
 
@@ -83,18 +99,19 @@ def verify_proposal(proposal: Proposal, constraints: list[Constraint], pack: Evi
     valid = sorted(e for e in cited if e in known)
     invalid = sorted(e for e in cited if e not in known)
     checks = [check_constraint(c, proposal, pack) for c in constraints]
+    desc = {c.constraint_id: c.description for c in constraints}
     reasons: list[str] = []
     mandatory = [c for c in checks if c.mandatory]
     if any(c.result == CheckResult.FAIL for c in mandatory):
         elig = Eligibility.INELIGIBLE
-        reasons += [f"restricao obrigatoria '{c.constraint_id}' violada: {c.reason}" for c in mandatory if c.result == CheckResult.FAIL]
+        reasons += [f"Quebra a regra “{desc[c.constraint_id]}”: {c.reason}" for c in mandatory if c.result == CheckResult.FAIL]
     elif any(c.result == CheckResult.UNKNOWN for c in mandatory):
         elig = Eligibility.PENDING
-        reasons += [f"restricao obrigatoria '{c.constraint_id}' sem prova: {c.reason}" for c in mandatory if c.result == CheckResult.UNKNOWN]
+        reasons += [f"Sem prova para a regra “{desc[c.constraint_id]}”: {c.reason}" for c in mandatory if c.result == CheckResult.UNKNOWN]
     else:
         elig = Eligibility.ELIGIBLE
     if invalid:
-        reasons.append(f"referencias inexistentes citadas: {', '.join(invalid)}")
+        reasons.append(f"Cita evidências que não existem: {', '.join(invalid)}")
     return Verification(
         candidate_id=proposal.candidate_id, proposal_version=proposal.version, checks=checks,
         valid_evidence_ids=valid, invalid_evidence_ids=invalid, eligibility=elig, reasons=reasons,

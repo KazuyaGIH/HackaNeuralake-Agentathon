@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, ApiError, TERMINAL, type CatalogResponse, type ChallengeConfig, type RunSummary, type SourceCreateResponse } from "@/lib/api";
 import { STATUS_LABEL, ago } from "@/lib/format";
-import { deleteProject, getProject, projectName, saveProject, withJudges, type Project } from "@/lib/projects";
+import { deleteProject, descendants, getProject, projectName, rootOf, runLabel, saveProject, withJudges, type Project, type RunMeta } from "@/lib/projects";
 import Icon, { type IconName } from "../Icon";
 import RunView from "../RunView";
 import { BudgetTab, ChallengeTab, DocumentsTab, JudgesTab, OverviewTab, RulesTab, TeamsTab, blockers } from "./tabs";
@@ -29,6 +29,9 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
   const [tab, setTab] = useState(initialTab ?? "overview");
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; hint?: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -98,7 +101,7 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
         : p,
     );
   const removeSource = (id: string) => persist({ sources: project.sources.filter((x) => x.source_id !== id), config: { ...cfg, source_ids: cfg.source_ids.filter((x) => x !== id) } });
-  const runNumber = (id: string) => project.runIds.indexOf(id) + 1;
+  const runName = (id: string) => runLabel(project, id);
   const go = (t: string) => {
     setTab(t);
     setError(null);
@@ -155,7 +158,9 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
     setBusy(true);
     setError(null);
     try {
-      const payload: ChallengeConfig = { ...cfg, title: cfg.title || null, seed: cfg.seed === null || (cfg.seed as unknown) === "" ? null : Number(cfg.seed) };
+      const payload: ChallengeConfig = {
+        ...cfg, title: cfg.title || null, seed: cfg.seed === null || (cfg.seed as unknown) === "" ? null : Number(cfg.seed), refinement: null, action_plan: null,
+      };
       if (payload.config_mode === "auto") payload.candidates = null;
       const key = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Date.now());
       const res = await api.createRun(payload, key);
@@ -168,15 +173,92 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
     }
   }
 
-  function addRun(runId: string) {
-    setProject((p) => (p ? saveProject({ ...p, runIds: p.runIds.includes(runId) ? p.runIds : [...p.runIds, runId] }) : p));
+  function addRun(runId: string, meta?: RunMeta) {
+    setProject((p) =>
+      p
+        ? saveProject({
+            ...p,
+            runIds: p.runIds.includes(runId) ? p.runIds : [...p.runIds, runId],
+            runMeta: { ...(p.runMeta ?? {}), [runId]: { kind: "arena", ...(p.runMeta?.[runId] ?? {}), ...(meta ?? {}) } },
+          })
+        : p,
+    );
     go(`arena:${runId}`);
+  }
+
+  function renameRun(runId: string, name: string) {
+    const clean = name.trim();
+    setProject((p) => (p ? saveProject({ ...p, runMeta: { ...(p.runMeta ?? {}), [runId]: { ...(p.runMeta?.[runId] ?? {}), name: clean || undefined } } }) : p));
+    setEditing(null);
+  }
+
+  async function removeRun(runId: string) {
+    try {
+      await api.deleteRun(runId);
+    } catch (e) {
+      setError({ message: `Não foi possível excluir: ${(e as Error).message}` });
+      return;
+    }
+    setProject((p) => {
+      if (!p) return p;
+      const runMeta = { ...(p.runMeta ?? {}) };
+      const parent = runMeta[runId]?.parent;
+      // Filhas da arena excluida sobem um nivel (continuam no projeto).
+      for (const [id, m] of Object.entries(runMeta)) if (m.parent === runId) runMeta[id] = { ...m, parent };
+      delete runMeta[runId];
+      return saveProject({ ...p, runIds: p.runIds.filter((x) => x !== runId), runMeta });
+    });
+    setConfirmDel(null);
+    if (tab === `arena:${runId}`) go("overview");
   }
 
   const activeRun = tab.startsWith("arena:") ? tab.slice(6) : null;
   const meta = CONFIG_TABS.find((t) => t.key === tab);
-  const sortedRuns = [...project.runIds].reverse();
   const statusOf = (id: string) => runs.find((r) => r.run_id === id);
+  const roots = [...project.runIds].reverse().filter((id) => rootOf(project, id) === id);
+  const KIND_ICON: Record<string, "zap" | "edit" | "file"> = { arena: "zap", refinement: "edit", action_plan: "file" };
+
+  const runRow = (id: string, child: boolean) => {
+    const r = statusOf(id);
+    const label = runName(id);
+    const kind = project.runMeta?.[id]?.kind ?? "arena";
+    if (editing === id)
+      return (
+        <form key={id} className={`side-edit ${child ? "child" : ""}`} onSubmit={(e) => (e.preventDefault(), renameRun(id, editValue))}>
+          <input autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => renameRun(id, editValue)} onKeyDown={(e) => e.key === "Escape" && setEditing(null)} />
+        </form>
+      );
+    if (confirmDel === id)
+      return (
+        <div key={id} className={`side-confirm ${child ? "child" : ""}`}>
+          <span>Excluir “{label}”?</span>
+          <button className="small danger solid" onClick={() => removeRun(id)}>
+            Excluir
+          </button>
+          <button className="small" onClick={() => setConfirmDel(null)}>
+            Não
+          </button>
+        </div>
+      );
+    return (
+      <div key={id} className={`side-run ${child ? "child" : ""} ${activeRun === id ? "active" : ""}`}>
+        <button className="side-item run" onClick={() => go(`arena:${id}`)} onDoubleClick={() => (setEditing(id), setEditValue(label))} title={r ? `${label} · ${STATUS_LABEL[r.status]}` : label}>
+          <span className={`dot ${r ? (DOT_CLASS[r.status] ?? "info") : "info"}`} />
+          {child && <Icon name={KIND_ICON[kind]} size={12} />}
+          <span className="run-name">{label}</span>
+          <span className="run-when">{r ? ago(r.created_at) : ""}</span>
+        </button>
+        <div className="side-actions">
+          <button className="icon-btn" title="Renomear" onClick={() => (setEditing(id), setEditValue(label))}>
+            <Icon name="edit" size={13} />
+          </button>
+          <button className="icon-btn" title="Excluir" onClick={() => setConfirmDel(id)}>
+            <Icon name="trash" size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="workspace">
@@ -206,17 +288,13 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
           <div className="side-label">
             Arenas <span className="side-count">{project.runIds.length}</span>
           </div>
-          {sortedRuns.length === 0 && <div className="side-empty">Nenhuma arena ainda</div>}
-          {sortedRuns.map((id) => {
-            const r = statusOf(id);
-            return (
-              <button key={id} className={`side-item run ${activeRun === id ? "active" : ""}`} onClick={() => go(`arena:${id}`)} title={r ? STATUS_LABEL[r.status] : ""}>
-                <span className={`dot ${r ? (DOT_CLASS[r.status] ?? "info") : "info"}`} />
-                <span className="run-name">Arena {runNumber(id)}</span>
-                <span className="run-when">{r ? ago(r.created_at) : ""}</span>
-              </button>
-            );
-          })}
+          {roots.length === 0 && <div className="side-empty">Nenhuma arena ainda</div>}
+          {roots.map((id) => (
+            <div key={id} className="side-group">
+              {runRow(id, false)}
+              {descendants(project, id).map((c) => runRow(c, true))}
+            </div>
+          ))}
         </nav>
       </aside>
 
@@ -245,14 +323,15 @@ export default function ProjectWorkspace({ projectId, initialTab }: { projectId:
 
           {activeRun ? (
             <RunView
-              key={activeRun} runId={activeRun} title={`Arena ${runNumber(activeRun)}`} onNewRun={addRun}
+              key={activeRun} runId={activeRun} title={runName(activeRun)} onNewRun={addRun}
+              onRename={() => (setEditing(activeRun), setEditValue(runName(activeRun)))} onDelete={() => setConfirmDel(activeRun)}
               onStatus={(d) => setRuns((rs) => rs.map((r) => (r.run_id === d.run_id ? { ...r, status: d.status, decision_status: d.decision_status, finished_at: d.finished_at } : r)))}
             />
           ) : !catalog ? (
             !error && <p className="muted">Carregando…</p>
           ) : tab === "overview" ? (
             <OverviewTab
-              cfg={cfg} update={update} catalog={catalog} sources={project.sources} runs={runs} runNumber={runNumber} go={go}
+              cfg={cfg} update={update} catalog={catalog} sources={project.sources} runs={runs} runName={runName} go={go}
               onDelete={() => {
                 deleteProject(project.id);
                 router.push("/");

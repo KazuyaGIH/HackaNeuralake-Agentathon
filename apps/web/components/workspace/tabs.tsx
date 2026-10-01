@@ -80,10 +80,10 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 /* ---------------------------------------------------------------- Visao geral */
 
-export function OverviewTab({ cfg, catalog, sources, runs, runNumber, go, onDelete }: Base & {
+export function OverviewTab({ cfg, catalog, sources, runs, runName, go, onDelete }: Base & {
   sources: SourceCreateResponse[];
   runs: RunSummary[];
-  runNumber: (id: string) => number;
+  runName: (id: string) => string;
   go: (tab: string) => void;
   onDelete: () => void;
 }) {
@@ -140,7 +140,7 @@ export function OverviewTab({ cfg, catalog, sources, runs, runNumber, go, onDele
                 <span className="check-dot">
                   <Icon name="zap" size={14} />
                 </span>
-                <span className="check-label">Arena {runNumber(r.run_id)}</span>
+                <span className="check-label">{runName(r.run_id)}</span>
                 <span className="check-value">
                   <span className={`badge ${STATUS_CLASS[r.status] ?? "info"}`}>{STATUS_LABEL[r.status] ?? r.status}</span> {DECISION_LABEL[r.decision_status] ?? r.decision_status} · {ago(r.created_at)}
                 </span>
@@ -626,7 +626,7 @@ function TeamCard({ c, index, open, onToggle, onChange, onRemove, canRemove, cat
     <div className={`panel judge team ${open ? "open" : ""}`} style={{ ["--judge" as string]: color }}>
       <div className="judge-head">
         <button className="judge-toggle" onClick={onToggle} title={open ? "Recolher" : "Editar"}>
-          <span className="judge-avatar">{c.name.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? index + 1}</span>
+          <span className="judge-avatar">{c.name.replace(/^equipe\s+/i, "").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? index + 1}</span>
           <span className="judge-title">
             <strong>{c.name}</strong>
             <ModelChips c={c} catalog={catalog} />

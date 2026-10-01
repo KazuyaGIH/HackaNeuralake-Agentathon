@@ -168,13 +168,16 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
                     f"{role}: preco desconhecido para {provider}/{option}; modo de orcamento estrito bloqueado", code="price_unknown",
                     hint="configure AGENTATHON_NEURALAKE_PRICES_FILE com precos versionados ou use budget.strict=false (orcamento indicativo)",
                 )
-    weights = {c.candidate_id or "": Decimal(c.quota_weight) for c in candidates}
+    # Na repescagem o orcamento e dividido so entre as equipes que seguem na disputa.
+    keep = {f.candidate_id for f in cfg.refinement.feedback} if cfg.refinement else None
+    active = [c for c in candidates if keep is None or c.candidate_id in keep]
+    weights = {c.candidate_id or "": Decimal(c.quota_weight) for c in active}
     caps = split_caps(cfg.budget.total_cap, Decimal(cfg.budget.common_share_pct), weights)
     specs: list[tuple[str, int | None, int, int]] = []
     # Cada juiz do painel recebe provisao protegida (custo estimado + uma chamada) na cota comum.
     judge_est = sum(ledger.plan(str(j.provider), j.model_option or "", 16000, j.max_output_tokens, NEURALAKE_OPTIONS).amount_nano for j in judges)
     specs.append((COMMON_BUCKET, caps[COMMON_BUCKET], judge_est, len(judges)))
-    for c in candidates:
+    for c in active:
         est = ledger.plan(str(c.provider), c.model_option, 12000, c.max_output_tokens, NEURALAKE_OPTIONS).amount_nano
         specs.append((candidate_bucket(c.candidate_id or ""), caps[candidate_bucket(c.candidate_id or "")], est, 1))
     if cfg.budget.total_cap is not None and cfg.budget.strict:
@@ -184,7 +187,7 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
                     f"orcamento insuficiente para uma execucao minima: bucket '{key}' precisa de ~{from_nano(prov)} {cfg.budget.currency} para a etapa protegida, cota = {from_nano(cap)}",
                     code="budget_insufficient", hint="aumente budget.total_cap, reduza max_output_tokens ou ajuste common_share_pct",
                 )
-    if len(candidates) + len(judges) > cfg.budget.max_total_calls:
+    if len(active) + len(judges) > cfg.budget.max_total_calls:
         raise IntakeError("max_total_calls insuficiente para consolidacao de todos os candidatos e o painel de juizes", code="budget_insufficient")
     if cfg.mode == ExecutionMode.REAL and not cfg.budget.strict:
         warnings.append("orcamento indicativo: o teto monetario nao e estrito; limites de tokens, chamadas e tempo continuam ativos")

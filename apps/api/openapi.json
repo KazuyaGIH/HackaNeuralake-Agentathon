@@ -336,6 +336,37 @@
             }
           }
         }
+      },
+      "delete": {
+        "summary": "Delete Run",
+        "description": "Exclui uma execucao encerrada e todos os seus registros (eventos, artefatos, chamadas, orcamento).",
+        "operationId": "delete_run_api_v1_runs__run_id__delete",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runs/{run_id}/cancel": {
@@ -396,6 +427,106 @@
             }
           }
         ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/refine": {
+      "post": {
+        "summary": "Refine Run",
+        "description": "Rodada de melhoria: as equipes escolhidas revisam com o feedback do cliente; todas sao reavaliadas.",
+        "operationId": "refine_run_api_v1_runs__run_id__refine_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefineIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/action-plan": {
+      "post": {
+        "summary": "Action Plan Run",
+        "description": "Entrega final: a equipe escolhida (padrao: vencedora) transforma a proposta em plano de acao.",
+        "operationId": "action_plan_run_api_v1_runs__run_id__action_plan_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionPlanIn"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "Successful Response",
@@ -633,6 +764,317 @@
   },
   "components": {
     "schemas": {
+      "ActionKpi": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Metric"
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Target"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metric",
+          "target"
+        ],
+        "title": "ActionKpi"
+      },
+      "ActionPhase": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Name"
+          },
+          "duration": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Duration",
+            "default": ""
+          },
+          "goal": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Goal",
+            "default": ""
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ActionTask"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "title": "Tasks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "duration",
+          "goal",
+          "tasks"
+        ],
+        "title": "ActionPhase"
+      },
+      "ActionPlan": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Summary"
+          },
+          "objectives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Objectives"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/ActionPhase"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Phases"
+          },
+          "kpis": {
+            "items": {
+              "$ref": "#/components/schemas/ActionKpi"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Kpis"
+          },
+          "risks": {
+            "items": {
+              "$ref": "#/components/schemas/ActionRisk"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Risks"
+          },
+          "budget_estimate": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Budget Estimate",
+            "default": ""
+          },
+          "next_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Next Steps"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Evidence Ids"
+          },
+          "candidate_id": {
+            "type": "string",
+            "title": "Candidate Id"
+          },
+          "proposal_version": {
+            "type": "integer",
+            "title": "Proposal Version"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "default": 1
+          },
+          "detail_request": {
+            "type": "string",
+            "title": "Detail Request",
+            "description": "O que o cliente pediu para detalhar nesta versao.",
+            "default": ""
+          },
+          "invalid_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Invalid Evidence Ids"
+          },
+          "call_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Call Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "summary",
+          "objectives",
+          "phases",
+          "kpis",
+          "risks",
+          "budget_estimate",
+          "next_steps",
+          "evidence_ids",
+          "candidate_id",
+          "proposal_version",
+          "version",
+          "detail_request",
+          "invalid_evidence_ids",
+          "call_ids"
+        ],
+        "title": "ActionPlan"
+      },
+      "ActionPlanIn": {
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id",
+            "description": "Equipe que monta o plano; padrao = vencedora."
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ActionPlanIn"
+      },
+      "ActionPlanSpec-Input": {
+        "properties": {
+          "parent_run_id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Parent Run Id"
+          },
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "title": "Candidate Id"
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_run_id",
+          "candidate_id"
+        ],
+        "title": "ActionPlanSpec",
+        "description": "Entrega final: a equipe escolhida transforma a proposta em um plano de acao concreto.\nPedido sobre um plano ja pronto = nova versao mais detalhada (instructions = o que detalhar)."
+      },
+      "ActionPlanSpec-Output": {
+        "properties": {
+          "parent_run_id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Parent Run Id"
+          },
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "title": "Candidate Id"
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_run_id",
+          "candidate_id",
+          "instructions"
+        ],
+        "title": "ActionPlanSpec",
+        "description": "Entrega final: a equipe escolhida transforma a proposta em um plano de acao concreto.\nPedido sobre um plano ja pronto = nova versao mais detalhada (instructions = o que detalhar)."
+      },
+      "ActionRisk": {
+        "properties": {
+          "risk": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Risk"
+          },
+          "mitigation": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Mitigation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "risk",
+          "mitigation"
+        ],
+        "title": "ActionRisk"
+      },
+      "ActionTask": {
+        "properties": {
+          "task": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Task"
+          },
+          "owner": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Owner",
+            "default": ""
+          },
+          "deliverable": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Deliverable",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "task",
+          "owner",
+          "deliverable"
+        ],
+        "title": "ActionTask"
+      },
       "Body_create_source_api_v1_sources_post": {
         "properties": {
           "file": {
@@ -1615,6 +2057,28 @@
             "type": "array",
             "maxItems": 10,
             "title": "Tags"
+          },
+          "refinement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RefinementSpec-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Preenchido pelo servidor em POST /runs/{id}/refine."
+          },
+          "action_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActionPlanSpec-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Preenchido pelo servidor em POST /runs/{id}/action-plan."
           }
         },
         "additionalProperties": false,
@@ -1770,6 +2234,28 @@
             "type": "array",
             "maxItems": 10,
             "title": "Tags"
+          },
+          "refinement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RefinementSpec-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Preenchido pelo servidor em POST /runs/{id}/refine."
+          },
+          "action_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActionPlanSpec-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Preenchido pelo servidor em POST /runs/{id}/action-plan."
           }
         },
         "additionalProperties": false,
@@ -1791,7 +2277,9 @@
           "critique_rounds",
           "seed",
           "mock_scenario",
-          "tags"
+          "tags",
+          "refinement",
+          "action_plan"
         ],
         "title": "ChallengeConfig",
         "description": "Configuracao completa de um desafio. Depois de validada e resolvida vira o snapshot imutavel do Run."
@@ -2768,6 +3256,11 @@
             "title": "Revised From Critique",
             "default": false
           },
+          "revised_from_feedback": {
+            "type": "boolean",
+            "title": "Revised From Feedback",
+            "default": false
+          },
           "call_ids": {
             "items": {
               "type": "string"
@@ -2792,6 +3285,7 @@
           "version",
           "invalid_evidence_ids",
           "revised_from_critique",
+          "revised_from_feedback",
           "call_ids"
         ],
         "title": "Proposal"
@@ -2946,6 +3440,110 @@
         "title": "RankingEntry",
         "description": "score_0_100 = media ponderada (pelo peso de cada juiz) das notas dos juizes em judge_scores.\n'grades' traz as notas por criterio apenas quando o painel tem um unico juiz (compatibilidade)."
       },
+      "RefineIn": {
+        "properties": {
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/TeamFeedback-Input"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Feedback"
+          },
+          "general_comment": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "General Comment",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "feedback"
+        ],
+        "title": "RefineIn"
+      },
+      "RefinementSpec-Input": {
+        "properties": {
+          "parent_run_id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Parent Run Id"
+          },
+          "round": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Round",
+            "default": 1
+          },
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/TeamFeedback-Input"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Feedback"
+          },
+          "general_comment": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "General Comment",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_run_id",
+          "feedback"
+        ],
+        "title": "RefinementSpec",
+        "description": "Repescagem pedida pelo cliente: so as equipes listadas seguem na disputa, revisam e sao reavaliadas."
+      },
+      "RefinementSpec-Output": {
+        "properties": {
+          "parent_run_id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Parent Run Id"
+          },
+          "round": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Round",
+            "default": 1
+          },
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/TeamFeedback-Output"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Feedback"
+          },
+          "general_comment": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "General Comment",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_run_id",
+          "round",
+          "feedback",
+          "general_comment"
+        ],
+        "title": "RefinementSpec",
+        "description": "Repescagem pedida pelo cliente: so as equipes listadas seguem na disputa, revisam e sao reavaliadas."
+      },
       "Report": {
         "properties": {
           "run_id": {
@@ -3096,6 +3694,16 @@
             ],
             "title": "Judge Shuffle Seed"
           },
+          "action_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActionPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "diversity_observed": {
             "additionalProperties": {
               "items": {
@@ -3133,6 +3741,7 @@
           "cost",
           "next_steps",
           "judge_shuffle_seed",
+          "action_plan",
           "diversity_observed"
         ],
         "title": "Report"
@@ -3775,6 +4384,51 @@
           "calculation"
         ],
         "title": "SpecialistKind"
+      },
+      "TeamFeedback-Input": {
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "title": "Candidate Id"
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Comment",
+            "description": "Comentario especifico; pode ficar vazio se houver comentario geral.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidate_id"
+        ],
+        "title": "TeamFeedback"
+      },
+      "TeamFeedback-Output": {
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "title": "Candidate Id"
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Comment",
+            "description": "Comentario especifico; pode ficar vazio se houver comentario geral.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "comment"
+        ],
+        "title": "TeamFeedback"
       },
       "TextSourceIn": {
         "properties": {

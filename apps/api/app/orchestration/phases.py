@@ -284,35 +284,40 @@ def _sanitize_proposal(ctx: RunContext, cid: str, out: ProposalOutput, version: 
     return Proposal(**data, candidate_id=cid, version=version, invalid_evidence_ids=invalid, revised_from_critique=revised, call_ids=call_ids)
 
 
-async def _propose_one(ctx: RunContext, cid: str, critique: Critique | None) -> None:
+async def _propose_one(ctx: RunContext, cid: str, critique: Critique | None, feedback: dict[str, Any] | None = None) -> None:
+    """Proposta inicial, revisao apos critica ou revisao com feedback do cliente (rodada de melhoria)."""
     assert ctx.pack is not None
     cand = ctx.candidate(cid)
     previous = ctx.proposals.get(cid)
     version = (previous.version + 1) if previous else 1
-    stage = "revise" if critique is not None else "propose"
+    revising = critique is not None or feedback is not None
+    stage = "revise" if revising else "propose"
     task_results = [r.model_dump(mode="json") for r in ctx.task_results.get(cid, [])]
+    critique_json = critique.model_dump(mode="json") if critique else None
     meta = {**_base_meta(ctx, cid), "task_results": task_results, "version": version,
-            "critique": critique.model_dump(mode="json") if critique else None, "previous": previous.model_dump(mode="json") if previous else None}
+            "critique": critique_json, "human_feedback": feedback, "previous": previous.model_dump(mode="json") if previous else None}
     try:
         out, call_ids = await ctx.call(
             role="thinker", stage=stage, candidate_id=cid, provider=str(cand.provider), option=cand.model_option,
             system=P.THINKER_SYSTEM,
             user=P.propose_user(ctx.snapshot.model_dump(mode="json"), cand.model_dump(mode="json"), ctx.pack.model_dump(mode="json"), task_results,
-                                critique.model_dump(mode="json") if critique else None, previous.model_dump(mode="json") if previous else None),
-            schema=ProposalOutput, max_output_tokens=cand.max_output_tokens, metadata=meta, protected=(critique is None),
+                                critique_json, previous.model_dump(mode="json") if previous else None, feedback=feedback),
+            schema=ProposalOutput, max_output_tokens=cand.max_output_tokens, metadata=meta, protected=not revising or feedback is not None,
         )
     except (CallDenied, CallFailed) as exc:
         reason = getattr(exc, "reason", str(exc))
-        if critique is None:
+        if not revising:
             ctx.partial_reasons.append(f"{cand.name}: proposta nao produzida ({reason})")
             await ctx.emit("proposal.failed", {"candidate_id": cid, "version": version, "reason": reason})
         else:
             ctx.operational_changes.append(f"{cand.name}: revisao nao realizada ({reason}); mantida a versao {previous.version if previous else 1}")
         return
     proposal = _sanitize_proposal(ctx, cid, out, version, revised=critique is not None, call_ids=call_ids)
+    proposal.revised_from_feedback = feedback is not None
     ctx.proposals[cid] = proposal
     await ctx.save_artifact("proposal", proposal, candidate_id=cid, version=version)
-    await ctx.emit("proposal.ready", {"candidate_id": cid, "version": version, "title": proposal.title, "invalid_evidence_ids": proposal.invalid_evidence_ids})
+    await ctx.emit("proposal.ready", {"candidate_id": cid, "version": version, "title": proposal.title, "invalid_evidence_ids": proposal.invalid_evidence_ids,
+                                      "from_feedback": feedback is not None})
 
 
 async def phase_propose(ctx: RunContext) -> None:
@@ -448,6 +453,7 @@ async def phase_judge(ctx: RunContext) -> None:
                 user=P.judge_user(ctx.snapshot.model_dump(mode="json"), ctx.pack.model_dump(mode="json"), criteria, anon, anon_ver, persona={"name": j.name, "instructions": j.instructions}),
                 schema=JudgeOutput, max_output_tokens=j.max_output_tokens, protected=True,
                 metadata={**_base_meta(ctx, None), "judge_id": jid, "judge_name": j.name, "persona": j.persona, "criteria": [c["criterion_id"] for c in criteria],
+                          "criteria_names": {c["criterion_id"]: c["name"] for c in criteria},
                           "proposals": anon, "verifications": anon_ver, "labels": list(label_map)},
                 validator=validator,
             )
@@ -481,9 +487,30 @@ def _intended_status(ctx: RunContext) -> RunStatus:
         return RunStatus.CANCELLED
     if ctx.halt == "failed":
         return RunStatus.FAILED
-    if ctx.halt == "limit" or ctx.partial_reasons or ctx.judge_error or len(ctx.proposals) < len(ctx.candidates):
+    # No plano de acao nao ha disputa: equipes que sairam em repescagens anteriores nao contam como propostas faltando.
+    missing_proposals = ctx.snapshot.action_plan is None and len(ctx.proposals) < len(ctx.candidates)
+    if ctx.halt == "limit" or ctx.partial_reasons or ctx.judge_error or missing_proposals:
         return RunStatus.PARTIAL
     return RunStatus.COMPLETED
+
+
+async def cost_breakdown(ctx: RunContext, costs: dict[str, Any]) -> CostBreakdown:
+    """Consumo DESTA execucao (rodadas derivadas reportam so o proprio gasto)."""
+    buckets = costs["buckets"]
+    common = buckets.get("common")
+    per_candidate = {
+        c.candidate_id or "": (from_nano(buckets[candidate_bucket(c.candidate_id or "")].spent_nano) or Decimal("0"))
+        if candidate_bucket(c.candidate_id or "") in buckets else Decimal("0")
+        for c in ctx.candidates
+    }
+    common_spent = (from_nano(common.spent_nano) if common else None) or Decimal("0")
+    secondary_calls, secondary_savings = await ctx.secondary_usage()
+    return CostBreakdown(
+        currency=ctx.snapshot.budget.currency, common=common_spent, judge=costs["judge"], per_candidate=per_candidate,
+        total=common_spent + sum(per_candidate.values(), Decimal("0")), pending_unknown_reserved=costs["pending_unknown"], quality=costs["quality"],
+        calls_used=costs["calls_used"], calls_cap=ctx.snapshot.budget.max_total_calls, cap=ctx.snapshot.budget.total_cap, strict=ctx.snapshot.budget.strict,
+        secondary_calls=secondary_calls, secondary_savings=secondary_savings,
+    )
 
 
 async def phase_rank_report(ctx: RunContext) -> Report:
@@ -498,6 +525,11 @@ async def phase_rank_report(ctx: RunContext) -> Report:
         quality = costs["bucket_quality"].get(candidate_bucket(cid), CostQuality.UNKNOWN)
         if b and b.pending_unknown_nano > 0:
             quality = CostQuality.UNKNOWN
+        if cid in ctx.inherited_costs:
+            # Rodada de melhoria: eficiencia sobre o consumo acumulado (rodadas anteriores + esta), nao so o desta rodada.
+            prev_spent, prev_quota = ctx.inherited_costs[cid]
+            spent = None if spent is None else spent + prev_spent
+            quota = None if quota is None or prev_quota is None else quota + prev_quota
         p = ctx.proposals.get(cid)
         evals = {jid: evs[cid] for jid, evs in ctx.evaluations.items() if cid in evs}
         inputs.append(CandidateInput(cid, c.name, p.version if p else None, ctx.verifications.get(cid), evals or None, spent, quota, quality))
@@ -507,11 +539,7 @@ async def phase_rank_report(ctx: RunContext) -> Report:
         ranking.decision_status = DecisionStatus.NOT_EVALUATED
         ranking.winner_candidate_id = None
         ranking.reasons = [ctx.judge_error or "sem avaliacao"] + ranking.reasons
-    common = buckets.get("common")
-    per_candidate = {c.candidate_id or "": (from_nano(buckets[candidate_bucket(c.candidate_id or "")].spent_nano) or Decimal("0")) if candidate_bucket(c.candidate_id or "") in buckets else Decimal("0") for c in ctx.candidates}
-    common_spent = from_nano(common.spent_nano) if common else Decimal("0")
-    total = (common_spent or Decimal("0")) + sum(per_candidate.values(), Decimal("0"))
-    secondary_calls, secondary_savings = await ctx.secondary_usage()
+    cost = await cost_breakdown(ctx, costs)
     status = _intended_status(ctx)
     limitations = list(ctx.limitations)
     if ctx.simulated:
@@ -532,14 +560,7 @@ async def phase_rank_report(ctx: RunContext) -> Report:
         evaluations=[ctx.evaluations[jid][cid] for cid in sorted({c for evs in ctx.evaluations.values() for c in evs})
                      for jid in (j.judge_id for j in ctx.judges) if jid in ctx.evaluations and cid in ctx.evaluations[jid]],
         evidence_pack_version=ctx.pack.version if ctx.pack else None, evidence_gaps=list(ctx.pack.gaps) if ctx.pack else [],
-        limitations=limitations, operational_changes=list(ctx.operational_changes),
-        cost=CostBreakdown(
-            currency=ctx.snapshot.budget.currency, common=common_spent or Decimal("0"), judge=costs["judge"], per_candidate=per_candidate,
-            total=total, pending_unknown_reserved=costs["pending_unknown"], quality=costs["quality"], calls_used=costs["calls_used"],
-            calls_cap=ctx.snapshot.budget.max_total_calls, cap=ctx.snapshot.budget.total_cap, strict=ctx.snapshot.budget.strict,
-            secondary_calls=secondary_calls, secondary_savings=secondary_savings,
-        ),
-        next_steps=next_steps, judge_shuffle_seed=ctx.judge_shuffle_seed,
+        limitations=limitations, operational_changes=list(ctx.operational_changes), cost=cost, next_steps=next_steps, judge_shuffle_seed=ctx.judge_shuffle_seed,
         diversity_observed={k: sorted(v) for k, v in ctx.reported_models.items()},
     )
     await ctx.save_artifact("report", report)

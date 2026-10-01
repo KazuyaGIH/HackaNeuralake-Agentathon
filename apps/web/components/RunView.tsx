@@ -4,100 +4,48 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, TERMINAL, type Report, type RunDetail, type RunEventView } from "@/lib/api";
-import { DECISION_LABEL, ELIGIBILITY_LABEL, STATUS_LABEL, elapsed, money, num, when } from "@/lib/format";
-import { createProject } from "@/lib/projects";
+import { elapsed, STATUS_LABEL } from "@/lib/format";
+import { createProject, type RunMeta } from "@/lib/projects";
 import Icon from "./Icon";
-import ResultsView from "./ResultsView";
+import ActionPlanView from "./arena/ActionPlanView";
+import LiveView, { Stepper } from "./arena/LiveView";
+import type { Feedback } from "./arena/NextSteps";
+import Results, { usd } from "./arena/Results";
+import { SILENT, deriveLive, kindOf } from "./arena/live";
 
-const STATUS_CLASS: Record<string, string> = { completed: "ok", partial: "warn", failed: "bad", cancelled: "info", interrupted: "bad", running: "accent", queued: "info" };
-const STAGES = ["plan", "delegate", "propose", "critique", "revise", "verify", "judge"] as const;
-const STAGE_LABEL: Record<string, string> = { plan: "planejamento", delegate: "especialistas", propose: "proposta", critique: "crítica", revise: "revisão", verify: "verificação", judge: "Judge" };
-
-type CandidateProgress = {
-  stages: Record<string, "done" | "active" | "fail" | "pending">;
-  tasks: { task_id: string; kind: string; status: string; error?: string | null; model_tier?: string; model_option?: string | null }[];
-  proposalVersions: number[];
-  eligibility?: string;
-  critiquesGiven: number;
-  critiquesReceived: number;
+type Props = {
+  runId: string;
+  title?: string;
+  onNewRun?: (runId: string, meta?: RunMeta) => void;
+  onStatus?: (detail: RunDetail) => void;
+  onRename?: () => void;
+  onDelete?: () => void;
 };
-
 type EvidenceItem = { evidence_id: string; excerpt: string; type: string; source_id: string | null; locator: { page?: number | null; section?: string | null; line_start?: number | null; line_end?: number | null }; provenance: string };
 
-function deriveProgress(events: RunEventView[], candidateIds: string[], critiqueRounds: number): Record<string, CandidateProgress> {
-  const out: Record<string, CandidateProgress> = {};
-  for (const cid of candidateIds) out[cid] = { stages: {}, tasks: [], proposalVersions: [], critiquesGiven: 0, critiquesReceived: 0 };
-  for (const e of events) {
-    const p = e.payload as Record<string, unknown>;
-    const cid = p.candidate_id as string | undefined;
-    switch (e.type) {
-      case "plan.ready":
-        if (cid && out[cid]) out[cid].stages.plan = "done";
-        break;
-      case "task.started":
-        if (cid && out[cid]) {
-          out[cid].stages.delegate = "active";
-          out[cid].tasks.push({ task_id: String(p.task_id), kind: String(p.kind), status: "running", model_tier: p.model_tier as string | undefined, model_option: p.model_option as string | null });
-        }
-        break;
-      case "task.completed":
-        if (cid && out[cid]) {
-          const t = out[cid].tasks.find((x) => x.task_id === p.task_id);
-          if (t) {
-            t.status = String(p.status);
-            t.error = p.error as string | null;
-          }
-          out[cid].stages.delegate = "done";
-        }
-        break;
-      case "proposal.ready":
-        if (cid && out[cid]) {
-          out[cid].proposalVersions.push(Number(p.version));
-          out[cid].stages.propose = "done";
-          if (Number(p.version) >= 2) out[cid].stages.revise = "done";
-        }
-        break;
-      case "proposal.failed":
-        if (cid && out[cid]) out[cid].stages.propose = "fail";
-        break;
-      case "critique.ready": {
-        const a = p.author_candidate_id as string;
-        const t = p.target_candidate_id as string;
-        if (out[a]) {
-          out[a].critiquesGiven += 1;
-          out[a].stages.critique = "done";
-        }
-        if (out[t]) out[t].critiquesReceived += 1;
-        break;
-      }
-      case "verification.ready":
-        if (cid && out[cid]) {
-          out[cid].stages.verify = "done";
-          out[cid].eligibility = String(p.eligibility);
-        }
-        break;
-      case "evaluation.ready":
-        for (const c of (p.candidates as string[]) ?? []) if (out[c]) out[c].stages.judge = "done";
-        break;
-      case "evaluation.failed":
-        for (const c of candidateIds) out[c].stages.judge = "fail";
-        break;
-    }
-  }
-  if (critiqueRounds === 0) for (const c of candidateIds) delete out[c].stages.critique, delete out[c].stages.revise;
-  return out;
-}
+const STATUS_CLASS: Record<string, string> = { completed: "ok", partial: "warn", failed: "bad", cancelled: "info", interrupted: "bad", running: "live", queued: "info" };
+// Ritmo do replay: rapido o bastante para nao cansar, lento o bastante para acompanhar cada etapa.
+const STEP_MS = 420;
 
-type Props = { runId: string; title?: string; onNewRun?: (runId: string) => void; onStatus?: (detail: RunDetail) => void };
+const ALL_EVENTS = [
+  "run.started", "evidence.ready", "plan.ready", "task.started", "task.completed", "proposal.ready", "proposal.failed", "critique.order", "critique.ready",
+  "verification.ready", "evaluation.ready", "evaluation.failed", "budget.updated", "call.finished", "report.ready", "run.finished", "run.failed", "run.cancelled",
+  "run.cancel_requested", "run.interrupted", "run.late_result", "run.queued", "action_plan.started", "action_plan.ready", "action_plan.failed",
+];
 
-export default function RunView({ runId, title, onNewRun, onStatus }: Props) {
+const TEAM_COLORS = ["#2563eb", "#16a34a", "#d97706", "#9333ea"];
+
+export default function RunView({ runId, title, onNewRun, onStatus, onRename, onDelete }: Props) {
   const router = useRouter();
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [shown, setShown] = useState<number | null>(null); // null = mostrar tudo; numero = replay em andamento
+  const [menu, setMenu] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>({});
+  const [sending, setSending] = useState(false);
   const lastSeq = useRef(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onStatusRef = useRef(onStatus);
@@ -134,10 +82,9 @@ export default function RunView({ runId, title, onNewRun, onStatus }: Props) {
       setEvents(initial);
       lastSeq.current = initial.length ? initial[initial.length - 1].seq : 0;
       if (!d || TERMINAL.has(d.status)) return;
-      // Reconexao segura: EventSource reenvia Last-Event-ID; recarregar a aba nao recria nem cancela o job.
+      // Run ainda em andamento ao abrir: os eventos entram no ritmo do replay para dar tempo de acompanhar.
+      setShown(initial.length);
       es = new EventSource(api.eventsUrl(runId, lastSeq.current));
-      es.onopen = () => setConnected(true);
-      es.onerror = () => setConnected(false);
       const onAny = (ev: MessageEvent) => {
         try {
           const data = JSON.parse(ev.data) as RunEventView & { seq: number };
@@ -146,17 +93,12 @@ export default function RunView({ runId, title, onNewRun, onStatus }: Props) {
           setEvents((prev) => (prev.some((x) => x.seq === data.seq) ? prev : [...prev, data]));
           scheduleRefresh();
         } catch {
-          /* ignora heartbeats */
+          /* heartbeat */
         }
       };
-      for (const t of [
-        "run.started", "evidence.ready", "plan.ready", "task.started", "task.completed", "proposal.ready", "proposal.failed", "critique.order", "critique.ready",
-        "verification.ready", "evaluation.ready", "evaluation.failed", "budget.updated", "call.finished", "report.ready", "run.finished", "run.failed", "run.cancelled",
-        "run.cancel_requested", "run.interrupted", "run.late_result", "run.queued",
-      ]) es.addEventListener(t, onAny as EventListener);
+      for (const t of ALL_EVENTS) es.addEventListener(t, onAny as EventListener);
       es.addEventListener("stream.end", () => {
         es?.close();
-        setConnected(false);
         void refreshDetail();
       });
     })();
@@ -166,257 +108,241 @@ export default function RunView({ runId, title, onNewRun, onStatus }: Props) {
     };
   }, [runId, refreshDetail, scheduleRefresh]);
 
-  const candidates = detail?.snapshot.candidates ?? [];
-  const progress = useMemo(() => deriveProgress(events, candidates.map((c) => c.candidate_id ?? ""), detail?.snapshot.critique_rounds ?? 1), [events, candidates, detail]);
-  const packs = (detail?.artifacts.evidence_pack as { version: number; items: EvidenceItem[]; gaps: string[] }[] | undefined) ?? [];
+  // Replay: avanca um evento "visivel" por passo; eventos silenciosos (custos) passam junto.
+  useEffect(() => {
+    if (shown === null) return;
+    if (shown >= events.length) {
+      if (detail && TERMINAL.has(detail.status) && events.length > 0) {
+        const t = setTimeout(() => setShown(null), 700);
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+    const t = setTimeout(() => {
+      let n = shown;
+      while (n < events.length && SILENT.has(events[n].type)) n++;
+      setShown(Math.min(events.length, n + 1));
+    }, shown === 0 ? 250 : STEP_MS);
+    return () => clearTimeout(t);
+  }, [shown, events, detail]);
+
+  const visible = useMemo(() => (shown === null ? events : events.slice(0, shown)), [events, shown]);
+  const live = useMemo(() => (detail ? deriveLive(detail, visible, shown === null && TERMINAL.has(detail.status)) : null), [detail, visible, shown]);
+  const packs = (detail?.artifacts.evidence_pack as { version: number; items: EvidenceItem[]; sources?: { source_id: string; title: string }[] }[] | undefined) ?? [];
   const latestPack = packs.length ? packs[packs.length - 1] : null;
   const evidence = latestPack?.items.find((i) => i.evidence_id === evidenceId) ?? null;
-  const isTerminal = detail ? TERMINAL.has(detail.status) : false;
+  const sourceTitle = (sid: string | null) => (sid ? (packs[0]?.sources?.find((s) => s.source_id === sid)?.title ?? sid) : "cálculo derivado");
+
+  if (!detail || !live) return error ? <div className="error">{error}</div> : <div className="arena-loading"><span className="spinner" /> Carregando a arena…</div>;
+
+  const isTerminal = TERMINAL.has(detail.status);
+  const playing = shown !== null;
+  const showResults = isTerminal && !playing && report;
 
   async function cancel() {
-    if (!confirm("Cancelar esta execução? Chamadas em voo terminam, mas nenhuma nova é admitida.")) return;
     await api.cancel(runId).catch((e: Error) => setError(e.message));
     scheduleRefresh();
   }
 
   function duplicate() {
     if (!detail) return;
-    const sources = (latestPack?.items ?? []).length
-      ? (packs[0] as unknown as { sources: { source_id: string; title: string; chars: number; media_type: string; sha256: string; warnings: string[]; pages: number | null }[] }).sources.map((s) => ({
-          source_id: s.source_id, title: s.title, media_type: s.media_type, size_bytes: 0, sha256: s.sha256, extraction_status: "ok", pages: s.pages, chars: s.chars, warnings: s.warnings,
-        }))
-      : [];
-    const project = createProject({ ...detail.snapshot, seed: null }, sources);
+    const sources = (packs[0]?.sources ?? []).map((s) => ({
+      source_id: s.source_id, title: s.title, media_type: "text/markdown", size_bytes: 0, sha256: "", extraction_status: "ok", pages: null, chars: 0, warnings: [],
+    }));
+    const project = createProject({ ...detail.snapshot, seed: null, refinement: null, action_plan: null }, sources);
     router.push(`/projetos/${project.id}`);
+  }
+
+  function openNew(newId: string, meta: RunMeta) {
+    if (onNewRun) onNewRun(newId, meta);
+    else router.push(`/runs/${newId}`);
   }
 
   async function retry() {
     try {
       const r = await api.retry(runId);
-      if (onNewRun) onNewRun(r.run_id);
-      else router.push(`/runs/${r.run_id}`);
+      openNew(r.run_id, { kind: "arena" });
     } catch (e) {
       setError((e as Error).message);
     }
   }
 
-  if (!detail) return error ? <div className="error">{error}</div> : <p className="muted">Carregando execução…</p>;
+  async function refine(items: { candidate_id: string; comment: string }[], general: string) {
+    setSending(true);
+    try {
+      const r = await api.refine(runId, items, general);
+      openNew(r.run_id, { kind: "refinement", parent: runId });
+    } catch (e) {
+      setError((e as Error).message);
+      setSending(false);
+    }
+  }
 
-  const m = detail.metrics;
-  const spentPct = m.cap ? Math.min(100, (Number(m.spent) / Number(m.cap)) * 100) : null;
+  async function plan(candidateId: string, instructions: string) {
+    setSending(true);
+    try {
+      const r = await api.actionPlan(runId, candidateId, instructions);
+      openNew(r.run_id, { kind: "action_plan", parent: runId });
+    } catch (e) {
+      setError((e as Error).message);
+      setSending(false);
+    }
+  }
+
+  const kind = kindOf(detail);
+  const cands = detail.snapshot.candidates ?? [];
+  const teamOf = (id: string) => {
+    const i = cands.findIndex((c) => c.candidate_id === id);
+    return { name: cands[i]?.name ?? id, color: cands[i]?.color ?? TEAM_COLORS[Math.max(0, i) % TEAM_COLORS.length] };
+  };
+
+  const statusKey = playing ? "running" : detail.status;
 
   return (
-    <div>
-      <div className="row spread" style={{ marginBottom: 16 }}>
+    <div className="arena">
+      <header className="arena-head">
         <div>
-          <h1>{title ?? (detail.title || detail.run_id)}</h1>
-          <div className="row">
-            <span className={`badge ${STATUS_CLASS[detail.status] ?? "info"}`}>{STATUS_LABEL[detail.status] ?? detail.status}</span>
-            {detail.simulated ? <span className="badge seal">SIMULADO</span> : <span className="badge accent">REAL · {detail.mode}</span>}
-            <span className="badge info">{DECISION_LABEL[detail.decision_status] ?? detail.decision_status}</span>
-            <span className="mono muted">{detail.run_id}</span>
-            {!isTerminal && <span className="hint">{connected ? "● eventos ao vivo" : "○ reconectando (polling)"}</span>}
+          <h1>{title ?? (detail.title || "Arena")}</h1>
+          <div className="arena-meta">
+            <span className={`status-pill ${STATUS_CLASS[statusKey] ?? "info"}`}>
+              <span className="pulse" />
+              {playing && isTerminal ? "Reproduzindo" : (STATUS_LABEL[statusKey] ?? statusKey)}
+            </span>
+            {detail.simulated && <span className="badge seal">SIMULADO</span>}
+            {kind === "refinement" && <span className="badge accent">Repescagem {detail.snapshot.refinement?.round}</span>}
+            {kind === "action_plan" && <span className="badge accent">Plano de ação</span>}
+            <span className="muted small">
+              {kind === "refinement" ? (detail.snapshot.refinement?.feedback.length ?? 0) : cands.length} equipe{(kind === "refinement" ? (detail.snapshot.refinement?.feedback.length ?? 0) : cands.length) === 1 ? "" : "s"} · {(detail.snapshot.judges ?? []).length || 1} juiz{((detail.snapshot.judges ?? []).length || 1) > 1 ? "es" : ""}
+              {isTerminal && ` · ${elapsed(detail.started_at, detail.finished_at)} · ${usd(report?.cost.total ?? detail.metrics.spent)}`}
+            </span>
           </div>
         </div>
         <div className="row">
           {!isTerminal && (
             <button className="danger" onClick={cancel}>
-              Cancelar
+              <Icon name="x" /> Cancelar
             </button>
           )}
-          <button onClick={duplicate}>Copiar para novo projeto</button>
-          {isTerminal && <button onClick={retry}>Repetir (novo run)</button>}
-          {report && (
-            <>
-              <a href={api.reportUrl(runId, "json")} target="_blank" rel="noreferrer">
-                <button>Exportar JSON</button>
-              </a>
-              <a href={api.reportUrl(runId, "md")} target="_blank" rel="noreferrer">
-                <button>Exportar Markdown</button>
-              </a>
-            </>
+          {isTerminal && !playing && (
+            <button onClick={() => setShown(0)}>
+              <Icon name="play" size={14} /> Rever execução
+            </button>
           )}
+          {playing && isTerminal && <button onClick={() => setShown(null)}>Pular para o resultado</button>}
+          {isTerminal && kind === "arena" && (
+            <button onClick={retry}>
+              <Icon name="zap" size={14} /> Rodar de novo
+            </button>
+          )}
+          <div className="menu">
+            <button className="icon-btn bordered" onClick={() => setMenu(!menu)} title="Mais opções">
+              <span className="kebab">
+                <i />
+                <i />
+                <i />
+              </span>
+            </button>
+            {menu && (
+              <>
+                <div className="menu-backdrop" onClick={() => setMenu(false)} />
+                <div className="menu-pop">
+                  {report && (
+                    <>
+                      <a href={api.reportUrl(runId, "md")} target="_blank" rel="noreferrer" onClick={() => setMenu(false)}>
+                        <Icon name="file" /> Baixar relatório (Markdown)
+                      </a>
+                      <a href={api.reportUrl(runId, "json")} target="_blank" rel="noreferrer" onClick={() => setMenu(false)}>
+                        <Icon name="file" /> Baixar dados (JSON)
+                      </a>
+                    </>
+                  )}
+                  <button onClick={duplicate}>
+                    <Icon name="folder" /> Copiar para novo projeto
+                  </button>
+                  {onRename && (
+                    <button onClick={() => (setMenu(false), onRename())}>
+                      <Icon name="edit" /> Renomear
+                    </button>
+                  )}
+                  {onDelete && isTerminal && (
+                    <button className="menu-danger" onClick={() => (setMenu(false), onDelete())}>
+                      <Icon name="trash" /> Excluir
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      </header>
+
       {error && <div className="error">{error}</div>}
-      {detail.error && <div className="notice">{detail.error}</div>}
-      {detail.parent_run_id && (
+      {detail.error && !playing && <div className="notice">{detail.error}</div>}
+      {detail.parent_run_id && kind === "arena" && (
         <p className="hint">
-          Nova tentativa de <Link href={`/runs/${detail.parent_run_id}`}>{detail.parent_run_id}</Link>.
+          Nova tentativa de <Link href={`/runs/${detail.parent_run_id}`}>uma arena anterior</Link>.
         </p>
       )}
 
-      <div className="grid three">
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Orçamento</h3>
-          <dl className="kv">
-            <dt>Chamadas</dt>
-            <dd>
-              {m.calls_used} / {m.calls_cap}
-            </dd>
-            <dt>Gasto conhecido</dt>
-            <dd>
-              {money(m.spent, m.currency)} <span className="badge info">{m.cost_quality}</span>
-            </dd>
-            <dt>Reservado</dt>
-            <dd>{money(m.reserved, m.currency)}</dd>
-            {Number(m.pending_unknown) > 0 && (
+      {showResults && kind === "action_plan" ? (
+        report.action_plan ? (
+          <ActionPlanView
+            plan={report.action_plan} report={report} runId={runId} team={teamOf(report.action_plan.candidate_id)} onEvidence={setEvidenceId}
+            constraints={detail.snapshot.constraints}
+            onDetail={(ask) => plan(report.action_plan!.candidate_id, ask)} busy={sending}
+          />
+        ) : (
+          <div className="panel empty small-empty">
+            <p className="muted">O plano de ação não foi produzido. {report.limitations.slice(-1)[0]}</p>
+          </div>
+        )
+      ) : showResults ? (
+        <>
+          <div className="panel done-strip">
+            <Stepper live={live} compact />
+          </div>
+          <Results
+            report={report} detail={detail} events={events} onEvidence={setEvidenceId}
+            next={report.proposals.length ? { feedback, setFeedback, onRefine: refine, onPlan: plan, busy: sending } : null}
+          />
+        </>
+      ) : isTerminal && !playing && !report ? (
+        <div className="panel empty small-empty">
+          <p className="muted">A execução terminou sem relatório ({STATUS_LABEL[detail.status] ?? detail.status}).</p>
+        </div>
+      ) : (
+        <LiveView live={live} paced={playing && isTerminal} />
+      )}
+
+      {evidenceId && (
+        <>
+          <div className="drawer-backdrop" onClick={() => setEvidenceId(null)} />
+          <aside className="drawer">
+            <div className="drawer-head">
+              <div>
+                <div className="eyebrow">Evidência</div>
+                <strong className="mono">{evidenceId}</strong>
+              </div>
+              <button className="icon-btn" onClick={() => setEvidenceId(null)} title="Fechar">
+                <Icon name="x" />
+              </button>
+            </div>
+            {evidence ? (
               <>
-                <dt>Pendente (desconhecido)</dt>
-                <dd className="badge warn">{money(m.pending_unknown, m.currency)}</dd>
+                <dl className="kv">
+                  <dt>Fonte</dt>
+                  <dd>{sourceTitle(evidence.source_id)}</dd>
+                  <dt>Local</dt>
+                  <dd>{evidence.locator.page ? `página ${evidence.locator.page}` : evidence.locator.line_start ? `linhas ${evidence.locator.line_start}–${evidence.locator.line_end}` : (evidence.locator.section ?? "—")}</dd>
+                </dl>
+                <blockquote className="excerpt">{evidence.excerpt}</blockquote>
               </>
+            ) : (
+              <p className="muted">Trecho não encontrado no pacote de evidências.</p>
             )}
-            <dt>Teto</dt>
-            <dd>{m.cap ? money(m.cap, m.currency) : "sem teto monetário"}</dd>
-          </dl>
-          {spentPct !== null && (
-            <div className="progress" title={`${spentPct.toFixed(1)}% do teto`}>
-              <div style={{ width: `${spentPct}%` }} />
-            </div>
-          )}
-          <details style={{ marginTop: 8 }}>
-            <summary>Buckets</summary>
-            <table>
-              <tbody>
-                {detail.budget_buckets.map((b) => (
-                  <tr key={b.bucket_key}>
-                    <td className="mono">{b.bucket_key}</td>
-                    <td className="num">
-                      {num(b.spent, 5)} / {b.cap ? num(b.cap, 3) : "∞"}
-                    </td>
-                    <td className="num">{b.calls_used} ch.</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </details>
-        </div>
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Execução</h3>
-          <dl className="kv">
-            <dt>Criada</dt>
-            <dd>{when(detail.created_at)}</dd>
-            <dt>Início</dt>
-            <dd>{when(detail.started_at)}</dd>
-            <dt>Duração</dt>
-            <dd>
-              {elapsed(detail.started_at, detail.finished_at)} / {m.deadline_s} s
-            </dd>
-            <dt>Seed</dt>
-            <dd className="mono">{detail.seed}</dd>
-            <dt>Rodada crítica</dt>
-            <dd>{detail.snapshot.critique_rounds}</dd>
-            <dt>Evidências</dt>
-            <dd>{latestPack ? `${latestPack.items.length} trechos · pacote v${latestPack.version}` : "—"}</dd>
-          </dl>
-          <details style={{ marginTop: 8 }}>
-            <summary>Configuração congelada (hashes)</summary>
-            <div className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>
-              {Object.entries(detail.snapshot_hashes).map(([k, v]) => (
-                <div key={k}>
-                  {k}: {v}
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-        <div className="panel evidence-panel">
-          <h3 style={{ marginTop: 0 }}>Evidência selecionada</h3>
-          {evidence ? (
-            <div>
-              <div className="mono">{evidence.evidence_id}</div>
-              <div className="hint">
-                {evidence.type} · fonte {evidence.source_id ?? "derivação"} · {evidence.locator.page ? `p. ${evidence.locator.page}` : `linhas ${evidence.locator.line_start}-${evidence.locator.line_end}`} ·{" "}
-                {evidence.provenance}
-              </div>
-              <p style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>{evidence.excerpt}</p>
-            </div>
-          ) : (
-            <p className="hint">Clique em um ID de evidência (ev-…/drv-…) para ver o trecho e o localizador.</p>
-          )}
-          {latestPack && latestPack.gaps.length > 0 && (
-            <details>
-              <summary>Lacunas do pacote ({latestPack.gaps.length})</summary>
-              <ul className="tight">
-                {latestPack.gaps.map((g, i) => (
-                  <li key={i}>{g}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      </div>
-
-      <h2>Candidatos</h2>
-      <div className="grid two">
-        {candidates.map((c) => {
-          const cid = c.candidate_id ?? "";
-          const pr = progress[cid];
-          const entry = report?.ranking.find((e) => e.candidate_id === cid);
-          return (
-            <div key={cid} className="card" style={{ borderLeftColor: c.color ?? "#2563eb" }}>
-              <div className="row spread">
-                <h3>{c.name}</h3>
-                <span className="row">
-                  {entry?.score_0_100 != null && <span className="badge accent">score {num(entry.score_0_100)}</span>}
-                  {pr?.eligibility && <span className={`badge ${pr.eligibility === "eligible" ? "ok" : pr.eligibility === "ineligible" ? "bad" : "warn"}`}>{ELIGIBILITY_LABEL[pr.eligibility]}</span>}
-                </span>
-              </div>
-              {report && Number(report.cost.secondary_savings?.[cid] ?? 0) > 0 && (
-                <div className="economy-note" style={{ marginTop: 0, marginBottom: 8 }}>
-                  <Icon name="zap" /> {report.cost.secondary_calls[cid]} tarefa(s) no modelo econômico · economia estimada {money(report.cost.secondary_savings[cid], report.cost.currency)}
-                </div>
-              )}
-              <div className="meta">
-                principal {c.provider}/{c.model_option}
-                {c.secondary_model_option ? ` · econômico ${c.secondary_model_option}` : ""} · preset {c.preset ?? "personalizado"} · até {c.max_specialist_tasks} tarefas · especialistas: {(c.allowed_specialists ?? []).join(", ") || "nenhum"}
-              </div>
-              <div className="steps">
-                {STAGES.filter((s) => !(detail.snapshot.critique_rounds === 0 && (s === "critique" || s === "revise"))).map((s) => (
-                  <span key={s} className={`step ${pr?.stages[s] ?? ""}`}>
-                    {STAGE_LABEL[s]}
-                  </span>
-                ))}
-              </div>
-              {pr && pr.tasks.length > 0 && (
-                <ul className="tight">
-                  {pr.tasks.map((t) => (
-                    <li key={t.task_id}>
-                      <code>{t.task_id}</code> {t.kind} — <span className={`badge ${t.status === "completed" ? "ok" : t.status === "running" ? "accent" : "warn"}`}>{t.status}</span>{" "}
-                      {t.model_tier === "secondary" && <span className="model-chip second">⚡ econômico · {t.model_option}</span>}
-                      {t.model_tier === "main" && <span className="model-chip main">principal · {t.model_option}</span>}
-                      {t.model_tier === "none" && <span className="model-chip">sem IA (cálculo)</span>}
-                      {t.error && <span className="hint"> {t.error}</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="hint">
-                Propostas: {pr?.proposalVersions.length ? pr.proposalVersions.map((v) => `v${v}`).join(", ") : "—"} · críticas emitidas {pr?.critiquesGiven ?? 0} · recebidas {pr?.critiquesReceived ?? 0}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {report && <ResultsView report={report} detail={detail} onEvidence={setEvidenceId} />}
-
-      <h2>Linha do tempo (eventos reais)</h2>
-      <div className="timeline">
-        {events.map((e) => {
-          const p = e.payload as Record<string, unknown>;
-          const brief = ["candidate_id", "version", "status", "eligibility", "task_id", "kind", "decision_status", "reason", "author_candidate_id", "target_candidate_id", "calls_used"]
-            .filter((k) => p[k] !== undefined && p[k] !== null)
-            .map((k) => `${k}=${String(p[k])}`)
-            .join(" ");
-          return (
-            <div key={e.seq}>
-              <span className="t">#{String(e.seq).padStart(3, " ")}</span> {new Date(e.ts).toLocaleTimeString("pt-BR")} <strong>{e.type}</strong> {brief}
-            </div>
-          );
-        })}
-        {events.length === 0 && <div>sem eventos ainda</div>}
-      </div>
+          </aside>
+        </>
+      )}
     </div>
   );
 }

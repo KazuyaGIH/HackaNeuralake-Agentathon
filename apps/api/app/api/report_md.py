@@ -4,6 +4,7 @@ import re
 
 from app.contracts.artifacts import Report
 from app.contracts.challenge import ChallengeConfig
+from app.evaluation.verifiers import fmt_value
 
 _HTML = re.compile(r"<[^>]+>")
 
@@ -18,6 +19,8 @@ def _fmt(value: object) -> str:
 
 def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
     names = {c.candidate_id: c.name for c in snapshot.candidates or []}
+    labels = {c.metric_key: c.description for c in snapshot.constraints if c.metric_key}
+    rules = {c.constraint_id: c.description for c in snapshot.constraints}
     lines: list[str] = []
     seal = "**SIMULADO**" if report.simulated else ("**REPLAY**" if report.replay else "**EXECUCAO REAL**")
     lines.append(f"# Relatorio Agentathon — {_t(report.title or report.run_id)}")
@@ -34,6 +37,49 @@ def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
     lines.append("## Objetivo")
     lines.append(_t(snapshot.objective))
     lines.append("")
+    if snapshot.refinement:
+        r = snapshot.refinement
+        lines.append(f"## Repescagem {r.round} (feedback do cliente)")
+        out = [c.name for c in snapshot.candidates or [] if c.candidate_id not in {f.candidate_id for f in r.feedback}]
+        if out:
+            lines.append(f"- Fora da disputa: {', '.join(_t(n) for n in out)}")
+        if r.general_comment:
+            lines.append(f"- Comentario geral: {_t(r.general_comment)}")
+        for f in r.feedback:
+            lines.append(f"- {_t(names.get(f.candidate_id, f.candidate_id))}: {_t(f.comment)}")
+        lines.append("")
+    plan = report.action_plan
+    if plan:
+        lines.append(f"## Plano de acao (versao {plan.version}) — {_t(names.get(plan.candidate_id, plan.candidate_id))}")
+        if plan.detail_request:
+            lines.append(f"Detalhamento pedido: {_t(plan.detail_request)}")
+        lines.append(f"### {_t(plan.title)}")
+        lines.append(_t(plan.summary))
+        lines.append("")
+        if plan.objectives:
+            lines.append("Objetivos:")
+            lines += [f"- {_t(o)}" for o in plan.objectives]
+            lines.append("")
+        for i, ph in enumerate(plan.phases, start=1):
+            lines.append(f"#### Fase {i}: {_t(ph.name)}" + (f" ({_t(ph.duration)})" if ph.duration else ""))
+            if ph.goal:
+                lines.append(f"Objetivo: {_t(ph.goal)}")
+            if ph.tasks:
+                lines.append("| Tarefa | Responsavel | Entregavel |")
+                lines.append("|---|---|---|")
+                lines += [f"| {_t(t.task)} | {_t(t.owner)} | {_t(t.deliverable)} |" for t in ph.tasks]
+            lines.append("")
+        if plan.kpis:
+            lines.append("KPIs:")
+            lines += [f"- {_t(k.metric)}: {_t(k.target)}" for k in plan.kpis]
+            lines.append("")
+        if plan.risks:
+            lines.append("Riscos e mitigacao:")
+            lines += [f"- {_t(r.risk)} → {_t(r.mitigation)}" for r in plan.risks]
+            lines.append("")
+        if plan.budget_estimate:
+            lines.append(f"Orcamento estimado: {_t(plan.budget_estimate)}")
+            lines.append("")
     lines.append("## Motivos da decisao")
     lines += [f"- {_t(r)}" for r in report.decision_reasons] or ["- (nenhum)"]
     lines.append("")
@@ -67,7 +113,7 @@ def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
             lines.append("")
             lines.append("Metricas declaradas:")
             for k, m in p.metrics.items():
-                lines.append(f"- `{_t(k)}` = {m.value} {_t(m.unit)} (evidencias: {', '.join(m.evidence_ids) or 'nenhuma'})")
+                lines.append(f"- {_t(labels.get(k, k.replace('_', ' ')))}: {fmt_value(m.value, m.unit)} (evidencias: {', '.join(m.evidence_ids) or 'nenhuma'})")
         for title, items in (("Passos", p.steps), ("Premissas", p.assumptions), ("Trade-offs", p.tradeoffs), ("Riscos", p.risks), ("Pendencias", p.open_items)):
             if items:
                 lines.append("")
@@ -81,7 +127,8 @@ def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
         for v in report.verifications:
             lines.append(f"### {_t(names.get(v.candidate_id, v.candidate_id))} (v{v.proposal_version}) — {v.eligibility}")
             for c in v.checks:
-                lines.append(f"- `{_t(c.constraint_id)}` → **{c.result}**: {_t(c.reason)}")
+                verdict = {"pass": "cumpre", "fail": "quebra", "unknown": "sem prova"}.get(str(c.result), str(c.result))
+                lines.append(f"- {_t(rules.get(c.constraint_id, c.constraint_id))} → **{verdict}**: {_t(c.reason)}")
             lines.append("")
     if report.critiques:
         lines.append("## Criticas cruzadas")

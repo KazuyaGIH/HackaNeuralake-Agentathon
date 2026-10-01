@@ -19,22 +19,27 @@ await page.waitForURL(/\/projetos\//, { timeout: 15000 });
 await page.waitForSelector("text=Configuração", { timeout: 15000 });
 await page.screenshot({ path: `${out}/01-form.png`, fullPage: true });
 await page.getByRole("button", { name: /Iniciar arena/ }).click();
-await page.waitForSelector("text=Candidatos", { timeout: 15000 });
+await page.waitForSelector(".live", { timeout: 15000 });
 await page.screenshot({ path: `${out}/02-running.png`, fullPage: true });
-await page.waitForSelector("text=Resultado", { timeout: 60000 });
-await page.waitForSelector("text=Propostas lado a lado", { timeout: 60000 });
+await page.waitForSelector(".winner", { timeout: 60000 });
 await page.screenshot({ path: `${out}/03-result.png`, fullPage: true });
-// Clique em uma evidencia para abrir o painel lateral
-const chip = page.locator(".chip").first();
+// Clique em uma evidencia (aba Propostas) para abrir o painel lateral
+await page.locator(".tabs button", { hasText: "Propostas" }).click();
+const chip = page.locator(".ev-chip").first();
 if (await chip.count()) { await chip.click(); await page.waitForTimeout(300); }
 await page.screenshot({ path: `${out}/04-evidence.png`, fullPage: false });
-// Recarregar a pagina: mesmo run, sem novas chamadas
+// Recarregar a pagina: mesmo run, sem novas chamadas (abre direto no resultado, sem replay)
 const url = page.url();
-const callsBefore = await page.locator("dl.kv dd").first().innerText();
+const calls = () => page.locator(".tile", { hasText: "Chamadas de IA" }).locator("strong").innerText();
+await page.keyboard.press("Escape");
 await page.reload({ waitUntil: "networkidle" });
 await page.locator(".side-item.run").first().click();
-await page.waitForSelector("text=Resultado", { timeout: 30000 });
-const callsAfter = await page.locator("dl.kv dd").first().innerText();
+await page.waitForSelector(".winner", { timeout: 30000 });
+const callsBefore = await calls();
+await page.reload({ waitUntil: "networkidle" });
+await page.locator(".side-item.run").first().click();
+await page.waitForSelector(".winner", { timeout: 30000 });
+const callsAfter = await calls();
 await page.goto(`${base}/runs`, { waitUntil: "networkidle" });
 await page.waitForSelector("table", { timeout: 15000 });
 await page.screenshot({ path: `${out}/05-history.png`, fullPage: true });

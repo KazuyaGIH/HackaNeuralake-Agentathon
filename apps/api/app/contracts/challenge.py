@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import ConfigDict, Field, model_validator
@@ -55,39 +55,39 @@ def default_rubric() -> Rubric:
         criteria=[
             RubricCriterion(
                 criterion_id="adherence",
-                name="Aderencia ao objetivo e as premissas",
-                description="Responde ao pedido e respeita as condicoes.",
+                name="Aderência ao objetivo e às premissas",
+                description="Responde ao pedido e respeita as condições.",
                 weight=Decimal("30"),
             ),
             RubricCriterion(
                 criterion_id="evidence_quality",
-                name="Qualidade das evidencias",
-                description="Fontes pertinentes e afirmacoes sustentadas.",
+                name="Qualidade das evidências",
+                description="Fontes pertinentes e afirmações sustentadas.",
                 weight=Decimal("25"),
             ),
             RubricCriterion(
                 criterion_id="reasoning",
-                name="Consistencia do raciocinio apresentado",
-                description="Justificativa coerente, sem contradicoes ou inferencias indevidas.",
+                name="Consistência do raciocínio apresentado",
+                description="Justificativa coerente, sem contradições ou inferências indevidas.",
                 weight=Decimal("20"),
             ),
             RubricCriterion(
                 criterion_id="completeness",
                 name="Completude",
-                description="Cobre entregaveis, dependencias e passos necessarios.",
+                description="Cobre entregáveis, dependências e passos necessários.",
                 weight=Decimal("10"),
             ),
             RubricCriterion(
                 criterion_id=EFFICIENCY_CRITERION_ID,
-                name="Eficiencia da execucao",
-                description="Consumo da equipe em relacao a cota: 10 * max(0, 1 - cost/quota). Calculado pelo servidor.",
+                name="Eficiência da execução",
+                description="Gasto da equipe em relação à sua cota de orçamento (quanto menos gastar, maior a nota). Calculado pelo sistema.",
                 weight=Decimal("10"),
                 computed_by="server_efficiency",
             ),
             RubricCriterion(
                 criterion_id="uncertainty",
                 name="Tratamento de incertezas",
-                description="Explicita limites, hipoteses e dados ausentes.",
+                description="Deixa claros os limites, as hipóteses e os dados que faltam.",
                 weight=Decimal("5"),
             ),
         ]
@@ -141,14 +141,14 @@ def persona_rubric(persona: str) -> Rubric:
             _c("technical_complexity", "Complexidade e qualidade técnica", "Profundidade técnica adequada ao problema, sem complexidade desnecessária.", 30),
             _c("architecture_viability", "Viabilidade da arquitetura", "A arquitetura é implementável dentro das restrições e escala para o caso.", 30),
             _c("technology_fit", "A tecnologia realmente funciona", "As tecnologias escolhidas são maduras e comprovadas para este uso.", 25),
-            _c(EFFICIENCY_CRITERION_ID, "Eficiência da execução", "Consumo da equipe em relação à cota: 10 * max(0, 1 - cost/quota). Calculado pelo servidor.", 15, "server_efficiency"),
+            _c(EFFICIENCY_CRITERION_ID, "Eficiência da execução", "Gasto da equipe em relação à sua cota de orçamento (quanto menos gastar, maior a nota). Calculado pelo sistema.", 15, "server_efficiency"),
         ])
     if persona == "business":
         return Rubric(criteria=[
             _c("real_pain", "Resolve uma dor real", "Ataca um problema relevante e concreto do cliente.", 35),
             _c("market_potential", "Potencial de mercado", "Tamanho da oportunidade e diferencial frente às alternativas.", 30),
             _c("monetization", "Modelo de monetização", "Caminho claro de receita, economia ou retorno sobre o investimento.", 25),
-            _c(EFFICIENCY_CRITERION_ID, "Eficiência da execução", "Consumo da equipe em relação à cota: 10 * max(0, 1 - cost/quota). Calculado pelo servidor.", 10, "server_efficiency"),
+            _c(EFFICIENCY_CRITERION_ID, "Eficiência da execução", "Gasto da equipe em relação à sua cota de orçamento (quanto menos gastar, maior a nota). Calculado pelo sistema.", 10, "server_efficiency"),
         ])
     if persona == "ux":
         return Rubric(criteria=[
@@ -244,6 +244,43 @@ class JudgeConfig(ContractModel):
     max_output_tokens: int = Field(default=3000, ge=300, le=8000)
 
 
+class TeamFeedback(ContractModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: Slug
+    comment: str = Field(default="", max_length=4000, description="Comentario especifico; pode ficar vazio se houver comentario geral.")
+
+
+class RefinementSpec(ContractModel):
+    """Repescagem pedida pelo cliente: so as equipes listadas seguem na disputa, revisam e sao reavaliadas."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_run_id: str = Field(max_length=40)
+    round: int = Field(default=1, ge=1, le=20)
+    feedback: list[TeamFeedback] = Field(min_length=1, max_length=MAX_CANDIDATES)
+    general_comment: str = Field(default="", max_length=4000)
+
+    @model_validator(mode="after")
+    def _check(self) -> "RefinementSpec":
+        if not self.general_comment.strip():
+            missing = [f.candidate_id for f in self.feedback if not f.comment.strip()]
+            if missing:
+                raise ValueError(f"escreva um comentario geral ou um comentario para cada equipe (faltando: {', '.join(missing)})")
+        return self
+
+
+class ActionPlanSpec(ContractModel):
+    """Entrega final: a equipe escolhida transforma a proposta em um plano de acao concreto.
+    Pedido sobre um plano ja pronto = nova versao mais detalhada (instructions = o que detalhar)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_run_id: str = Field(max_length=40)
+    candidate_id: Slug
+    instructions: str = Field(default="", max_length=4000)
+
+
 class ChallengeConfig(ContractModel):
     """Configuracao completa de um desafio. Depois de validada e resolvida vira o snapshot imutavel do Run."""
 
@@ -266,9 +303,13 @@ class ChallengeConfig(ContractModel):
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
     mock_scenario: str = Field(default="default", max_length=64, description="Somente em modo mock.")
     tags: list[str] = Field(default_factory=list, max_length=10)
+    refinement: RefinementSpec | None = Field(default=None, description="Preenchido pelo servidor em POST /runs/{id}/refine.")
+    action_plan: ActionPlanSpec | None = Field(default=None, description="Preenchido pelo servidor em POST /runs/{id}/action-plan.")
 
     @model_validator(mode="after")
     def _check(self) -> "ChallengeConfig":
+        if self.refinement is not None and self.action_plan is not None:
+            raise ValueError("refinement e action_plan sao exclusivos")
         ids = [c.constraint_id for c in self.constraints]
         if len(ids) != len(set(ids)):
             raise ValueError("constraint_id duplicado")

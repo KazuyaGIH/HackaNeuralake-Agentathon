@@ -122,7 +122,11 @@ export interface paths {
         get: operations["run_detail_api_v1_runs__run_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Run
+         * @description Exclui uma execucao encerrada e todos os seus registros (eventos, artefatos, chamadas, orcamento).
+         */
+        delete: operations["delete_run_api_v1_runs__run_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -162,6 +166,46 @@ export interface paths {
          * @description Nova tentativa explicita: novo run_id vinculado ao anterior, com a mesma configuracao congelada.
          */
         post: operations["retry_run_api_v1_runs__run_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/refine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refine Run
+         * @description Rodada de melhoria: as equipes escolhidas revisam com o feedback do cliente; todas sao reavaliadas.
+         */
+        post: operations["refine_run_api_v1_runs__run_id__refine_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/action-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Action Plan Run
+         * @description Entrega final: a equipe escolhida (padrao: vencedora) transforma a proposta em plano de acao.
+         */
+        post: operations["action_plan_run_api_v1_runs__run_id__action_plan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -246,6 +290,140 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActionKpi */
+        ActionKpi: {
+            /** Metric */
+            metric: string;
+            /** Target */
+            target: string;
+        };
+        /** ActionPhase */
+        ActionPhase: {
+            /** Name */
+            name: string;
+            /**
+             * Duration
+             * @default
+             */
+            duration: string;
+            /**
+             * Goal
+             * @default
+             */
+            goal: string;
+            /** Tasks */
+            tasks: components["schemas"]["ActionTask"][];
+        };
+        /** ActionPlan */
+        ActionPlan: {
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /** Objectives */
+            objectives: string[];
+            /** Phases */
+            phases: components["schemas"]["ActionPhase"][];
+            /** Kpis */
+            kpis: components["schemas"]["ActionKpi"][];
+            /** Risks */
+            risks: components["schemas"]["ActionRisk"][];
+            /**
+             * Budget Estimate
+             * @default
+             */
+            budget_estimate: string;
+            /** Next Steps */
+            next_steps: string[];
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Candidate Id */
+            candidate_id: string;
+            /** Proposal Version */
+            proposal_version: number;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /**
+             * Detail Request
+             * @description O que o cliente pediu para detalhar nesta versao.
+             * @default
+             */
+            detail_request: string;
+            /** Invalid Evidence Ids */
+            invalid_evidence_ids: string[];
+            /** Call Ids */
+            call_ids: string[];
+        };
+        /** ActionPlanIn */
+        ActionPlanIn: {
+            /**
+             * Candidate Id
+             * @description Equipe que monta o plano; padrao = vencedora.
+             */
+            candidate_id?: string | null;
+            /**
+             * Instructions
+             * @default
+             */
+            instructions: string;
+        };
+        /**
+         * ActionPlanSpec
+         * @description Entrega final: a equipe escolhida transforma a proposta em um plano de acao concreto.
+         *     Pedido sobre um plano ja pronto = nova versao mais detalhada (instructions = o que detalhar).
+         */
+        "ActionPlanSpec-Input": {
+            /** Parent Run Id */
+            parent_run_id: string;
+            /** Candidate Id */
+            candidate_id: string;
+            /**
+             * Instructions
+             * @default
+             */
+            instructions: string;
+        };
+        /**
+         * ActionPlanSpec
+         * @description Entrega final: a equipe escolhida transforma a proposta em um plano de acao concreto.
+         *     Pedido sobre um plano ja pronto = nova versao mais detalhada (instructions = o que detalhar).
+         */
+        "ActionPlanSpec-Output": {
+            /** Parent Run Id */
+            parent_run_id: string;
+            /** Candidate Id */
+            candidate_id: string;
+            /**
+             * Instructions
+             * @default
+             */
+            instructions: string;
+        };
+        /** ActionRisk */
+        ActionRisk: {
+            /** Risk */
+            risk: string;
+            /** Mitigation */
+            mitigation: string;
+        };
+        /** ActionTask */
+        ActionTask: {
+            /** Task */
+            task: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /**
+             * Deliverable
+             * @default
+             */
+            deliverable: string;
+        };
         /** Body_create_source_api_v1_sources_post */
         Body_create_source_api_v1_sources_post: {
             /** File */
@@ -651,6 +829,10 @@ export interface components {
             mock_scenario: string;
             /** Tags */
             tags?: string[];
+            /** @description Preenchido pelo servidor em POST /runs/{id}/refine. */
+            refinement?: components["schemas"]["RefinementSpec-Input"] | null;
+            /** @description Preenchido pelo servidor em POST /runs/{id}/action-plan. */
+            action_plan?: components["schemas"]["ActionPlanSpec-Input"] | null;
         };
         /**
          * ChallengeConfig
@@ -709,6 +891,10 @@ export interface components {
             mock_scenario: string;
             /** Tags */
             tags: string[];
+            /** @description Preenchido pelo servidor em POST /runs/{id}/refine. */
+            refinement: components["schemas"]["RefinementSpec-Output"] | null;
+            /** @description Preenchido pelo servidor em POST /runs/{id}/action-plan. */
+            action_plan: components["schemas"]["ActionPlanSpec-Output"] | null;
         };
         /**
          * CheckResult
@@ -1068,6 +1254,11 @@ export interface components {
              * @default false
              */
             revised_from_critique: boolean;
+            /**
+             * Revised From Feedback
+             * @default false
+             */
+            revised_from_feedback: boolean;
             /** Call Ids */
             call_ids: string[];
         };
@@ -1119,6 +1310,56 @@ export interface components {
             /** Notes */
             notes: string[];
         };
+        /** RefineIn */
+        RefineIn: {
+            /** Feedback */
+            feedback: components["schemas"]["TeamFeedback-Input"][];
+            /**
+             * General Comment
+             * @default
+             */
+            general_comment: string;
+        };
+        /**
+         * RefinementSpec
+         * @description Repescagem pedida pelo cliente: so as equipes listadas seguem na disputa, revisam e sao reavaliadas.
+         */
+        "RefinementSpec-Input": {
+            /** Parent Run Id */
+            parent_run_id: string;
+            /**
+             * Round
+             * @default 1
+             */
+            round: number;
+            /** Feedback */
+            feedback: components["schemas"]["TeamFeedback-Input"][];
+            /**
+             * General Comment
+             * @default
+             */
+            general_comment: string;
+        };
+        /**
+         * RefinementSpec
+         * @description Repescagem pedida pelo cliente: so as equipes listadas seguem na disputa, revisam e sao reavaliadas.
+         */
+        "RefinementSpec-Output": {
+            /** Parent Run Id */
+            parent_run_id: string;
+            /**
+             * Round
+             * @default 1
+             */
+            round: number;
+            /** Feedback */
+            feedback: components["schemas"]["TeamFeedback-Output"][];
+            /**
+             * General Comment
+             * @default
+             */
+            general_comment: string;
+        };
         /** Report */
         Report: {
             /** Run Id */
@@ -1168,6 +1409,7 @@ export interface components {
             next_steps: string[];
             /** Judge Shuffle Seed */
             judge_shuffle_seed: number | null;
+            action_plan: components["schemas"]["ActionPlan"] | null;
             /**
              * Diversity Observed
              * @description provider -> modelos efetivamente informados (ou 'unknown').
@@ -1394,6 +1636,28 @@ export interface components {
          * @enum {string}
          */
         SpecialistKind: "document_research" | "calculation";
+        /** TeamFeedback */
+        "TeamFeedback-Input": {
+            /** Candidate Id */
+            candidate_id: string;
+            /**
+             * Comment
+             * @description Comentario especifico; pode ficar vazio se houver comentario geral.
+             * @default
+             */
+            comment: string;
+        };
+        /** TeamFeedback */
+        "TeamFeedback-Output": {
+            /** Candidate Id */
+            candidate_id: string;
+            /**
+             * Comment
+             * @description Comentario especifico; pode ficar vazio se houver comentario geral.
+             * @default
+             */
+            comment: string;
+        };
         /** TextSourceIn */
         TextSourceIn: {
             /**
@@ -1716,6 +1980,35 @@ export interface operations {
             };
         };
     };
+    delete_run_api_v1_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cancel_run_api_v1_runs__run_id__cancel_post: {
         parameters: {
             query?: never;
@@ -1759,6 +2052,76 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refine_run_api_v1_runs__run_id__refine_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefineIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    action_plan_run_api_v1_runs__run_id__action_plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActionPlanIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {

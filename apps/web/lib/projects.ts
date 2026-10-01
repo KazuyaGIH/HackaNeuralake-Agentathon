@@ -2,14 +2,50 @@ import type { CatalogResponse, ChallengeConfig, JudgeConfig, Rubric, SourceCreat
 
 // Projetos vivem no navegador (localStorage): agrupam a configuracao em edicao, as fontes anexadas e as arenas
 // (runs) disparadas a partir dela. Os runs e as fontes continuam no backend; aqui ficam so os IDs.
+export type RunKind = "arena" | "refinement" | "action_plan";
+export type RunMeta = { name?: string; kind?: RunKind; parent?: string };
+
 export type Project = {
   id: string;
   config: ChallengeConfig;
   sources: SourceCreateResponse[];
   runIds: string[];
+  runMeta?: Record<string, RunMeta>;
   createdAt: string;
   updatedAt: string;
 };
+
+// Nome exibido de uma execucao do projeto: nome dado pelo usuario ou padrao pelo tipo
+// ("Arena 2", "Arena 2 · Repescagem 1", "Arena 2 · Plano de ação").
+export function runLabel(p: Project, runId: string): string {
+  const meta = p.runMeta?.[runId];
+  if (meta?.name) return meta.name;
+  const root = rootOf(p, runId);
+  const arenas = p.runIds.filter((id) => (p.runMeta?.[id]?.kind ?? "arena") === "arena");
+  const n = arenas.indexOf(root) + 1 || p.runIds.indexOf(root) + 1;
+  const base = p.runMeta?.[root]?.name ?? `Arena ${n}`;
+  if (root === runId) return base;
+  if (meta?.kind === "action_plan") {
+    const v = descendants(p, root).filter((id) => p.runMeta?.[id]?.kind === "action_plan").indexOf(runId) + 1;
+    return `${base} · Plano de ação${v > 1 ? ` v${v}` : ""}`;
+  }
+  const round = descendants(p, root).filter((id) => p.runMeta?.[id]?.kind === "refinement").indexOf(runId) + 1;
+  return `${base} · Repescagem ${round}`;
+}
+
+export function rootOf(p: Project, runId: string): string {
+  let cur = runId;
+  const seen = new Set<string>();
+  while (p.runMeta?.[cur]?.parent && p.runIds.includes(p.runMeta[cur].parent!) && !seen.has(cur)) {
+    seen.add(cur);
+    cur = p.runMeta[cur].parent!;
+  }
+  return cur;
+}
+
+export function descendants(p: Project, root: string): string[] {
+  return p.runIds.filter((id) => id !== root && rootOf(p, id) === root);
+}
 
 const KEY = "agentathon:projects";
 
@@ -55,6 +91,8 @@ export function emptyConfig(catalog: CatalogResponse | null): ChallengeConfig {
     seed: null,
     mock_scenario: "default",
     tags: [],
+    refinement: null,
+    action_plan: null,
   };
 }
 

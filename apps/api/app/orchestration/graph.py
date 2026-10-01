@@ -90,6 +90,13 @@ def build_graph():  # noqa: ANN201 - tipo do grafo compilado e interno ao LangGr
 
 
 async def run_arena(ctx: RunContext) -> str:
+    # Execucoes derivadas (pedidas apos uma arena encerrada) seguem fluxos curtos proprios.
+    from app.orchestration.followups import run_action_plan, run_refinement
+
+    if ctx.snapshot.action_plan is not None:
+        return await run_action_plan(ctx)
+    if ctx.snapshot.refinement is not None:
+        return await run_refinement(ctx)
     graph = build_graph()
     result = await graph.ainvoke({"ctx": ctx, "report": None, "final_status": None})
     return result.get("final_status") or "failed"

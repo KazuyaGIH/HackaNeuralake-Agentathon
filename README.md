@@ -199,6 +199,12 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
   documentos por padrão; opcionalmente críticas). O pensante pode marcar `model_tier: "main"` numa pesquisa difícil.
   Presets automáticos já trazem um econômico (exceto "Custo", cujo principal já é o mais barato). O relatório traz
   `cost.secondary_calls` e `cost.secondary_savings` (economia estimada vs. as mesmas chamadas no modelo principal).
+- **Ciclo com o cliente** (execuções derivadas, vinculadas por `parent_run_id`):
+  `POST /runs/{id}/refine` (`feedback: [{candidate_id, comment}]`, `general_comment`) cria uma **rodada de melhoria**: só
+  as equipes comentadas revisam a proposta com o feedback; todas passam de novo por regras e juízes. A eficiência usa o
+  custo/cota acumulados da cadeia de rodadas. `POST /runs/{id}/action-plan` (`candidate_id` opcional = vencedora,
+  `instructions`) gera o **plano de ação** (fases, tarefas, KPIs, riscos, orçamento) em `report.action_plan`, sem
+  reavaliar ninguém. `DELETE /runs/{id}` exclui uma execução encerrada. Nomes das arenas ficam no projeto (navegador).
 - **Especialista de cálculo** não usa inferência: o pensante pede a função tipada e o coordenador executa em código
   (`sum, subtract, multiply, divide, percent_of, percent_change, annual_from_monthly, monthly_from_annual, tco, min, max,
   average, per_unit`), exigindo entradas com `evidence_ids` existentes. A pesquisa documental usa recuperação lexical

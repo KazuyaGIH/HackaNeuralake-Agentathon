@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.budget.ledger import COMMON_BUCKET, BudgetDenied, Ledger, candidate_bucket
 from app.budget.prices import NEURALAKE_OPTIONS, from_nano, to_nano
 from app.config import Settings
-from app.contracts.artifacts import Critique, Evaluation, EvidencePack, Proposal, TaskPlan, TaskResult, Verification
+from app.contracts.artifacts import ActionPlan, Critique, Evaluation, EvidencePack, Proposal, Report, TaskPlan, TaskResult, Verification
 from app.contracts.challenge import CandidateConfig, ChallengeConfig, JudgeConfig
 from app.contracts.common import CostQuality, Provider, UsageQuality
 from app.providers.base import GenerateRequest, GenerateResult, ProviderAdapter, ProviderError
@@ -75,6 +75,10 @@ class RunContext:
     evaluations: dict[str, dict[str, Evaluation]] = field(default_factory=dict)  # judge_id -> candidate_id -> Evaluation
     judge_shuffle_seed: int | None = None
     judge_error: str | None = None
+    # Rodadas derivadas (melhoria/plano): custo e cota acumulados das rodadas anteriores, por candidato.
+    inherited_costs: dict[str, tuple[Decimal, Decimal | None]] = field(default_factory=dict)
+    parent_report: Report | None = None
+    action_plan: ActionPlan | None = None
     reported_models: dict[str, set[str]] = field(default_factory=dict)
     _call_counter: int = 0
 
@@ -85,7 +89,12 @@ class RunContext:
 
     @property
     def candidates(self) -> list[CandidateConfig]:
-        return list(self.snapshot.candidates or [])
+        """Equipes em disputa. Na repescagem (rodada de melhoria) so seguem as que receberam feedback."""
+        everyone = list(self.snapshot.candidates or [])
+        if self.snapshot.refinement is not None:
+            keep = {f.candidate_id for f in self.snapshot.refinement.feedback}
+            return [c for c in everyone if c.candidate_id in keep]
+        return everyone
 
     @property
     def judges(self) -> list[JudgeConfig]:
@@ -96,10 +105,11 @@ class RunContext:
         return [legacy.model_copy(update={"judge_id": legacy.judge_id or "j1", "rubric": legacy.rubric or self.snapshot.rubric})]
 
     def candidate(self, cid: str) -> CandidateConfig:
-        return next(c for c in self.candidates if c.candidate_id == cid)
+        return next(c for c in (self.snapshot.candidates or []) if c.candidate_id == cid)
 
     def candidate_index(self, cid: str) -> int:
-        return next(i for i, c in enumerate(self.candidates) if c.candidate_id == cid)
+        # Posicao na arena original (estavel entre rodadas, mesmo quando equipes saem da disputa).
+        return next(i for i, c in enumerate(self.snapshot.candidates or []) if c.candidate_id == cid)
 
     @property
     def simulated(self) -> bool:
@@ -368,6 +378,7 @@ def _schema_name(schema: type[BaseModel]) -> str:
         "ProposalOutput": "proposal",
         "CritiqueOutput": "critique",
         "JudgeOutput": "judge",
+        "ActionPlanOutput": "action_plan",
     }.get(schema.__name__, schema.__name__.lower())
 
 

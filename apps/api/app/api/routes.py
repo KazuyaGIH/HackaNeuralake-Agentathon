@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app import APP_VERSION
@@ -20,7 +20,7 @@ from app.budget.ledger import Ledger
 from app.budget.prices import from_nano
 from app.config import REPO_DIR
 from app.contracts.artifacts import Report
-from app.contracts.challenge import ChallengeConfig
+from app.contracts.challenge import ActionPlanSpec, ChallengeConfig, RefinementSpec, TeamFeedback
 from app.contracts.common import TERMINAL_STATUSES, CostQuality, RunStatus
 from app.contracts.runs import (
     BudgetBucketView,
@@ -34,7 +34,7 @@ from app.contracts.runs import (
     SourceCreateResponse,
 )
 from app.evidence.extract import EXTRACTOR_VERSION, ExtractionError, extract
-from app.storage.models import IdempotencyKey, Run, Source
+from app.storage.models import Artifact, BudgetBucket, CallUsage, IdempotencyKey, Run, RunEvent, Source
 from app.storage.repo import append_event, get_run, list_artifacts, list_buckets, list_calls, list_events, utcnow
 
 router = APIRouter()
@@ -301,6 +301,89 @@ async def retry_run(request: Request, session: Session, owner: Owner, run_id: st
     cfg = ChallengeConfig.model_validate(run.snapshot)
     new_run, _, _ = await _create_run(request, session, owner, cfg, idempotency_key=None, parent_run_id=run_id)
     return RunCreateResponse(run_id=new_run.id, status=RunStatus(new_run.status), created=True, links=_links(request, new_run.id))
+
+
+class RefineIn(BaseModel):
+    feedback: list[TeamFeedback] = Field(min_length=1, max_length=4)
+    general_comment: str = Field(default="", max_length=4000)
+
+
+class ActionPlanIn(BaseModel):
+    candidate_id: str | None = Field(default=None, description="Equipe que monta o plano; padrao = vencedora.")
+    instructions: str = Field(default="", max_length=4000)
+
+
+async def _finished_report(session: Session, run: Run) -> Report:
+    if run.status not in TERMINAL_STATUSES:
+        raise _err(409, "not_terminal", "a arena ainda esta em execucao")
+    arts = [a for a in await list_artifacts(session, run.id) if a.kind == "report"]
+    if not arts:
+        raise _err(409, "report_not_ready", "a arena terminou sem relatorio")
+    return Report.model_validate(arts[-1].payload)
+
+
+@api.post("/runs/{run_id}/refine", response_model=RunCreateResponse, status_code=202)
+async def refine_run(request: Request, session: Session, owner: Owner, run_id: str, body: RefineIn) -> RunCreateResponse:
+    """Rodada de melhoria: as equipes escolhidas revisam com o feedback do cliente; todas sao reavaliadas."""
+    run = await _owned_run(session, owner, run_id)
+    report = await _finished_report(session, run)
+    cfg = ChallengeConfig.model_validate(run.snapshot)
+    if cfg.action_plan is not None:
+        raise _err(422, "invalid_parent", "nao e possivel pedir melhoria sobre um plano de acao")
+    with_proposal = {p.candidate_id for p in report.proposals}
+    ids = [f.candidate_id for f in body.feedback]
+    if len(ids) != len(set(ids)):
+        raise _err(422, "invalid_feedback", "cada equipe pode receber um unico comentario por rodada")
+    missing = [i for i in ids if i not in with_proposal]
+    if missing:
+        raise _err(422, "invalid_feedback", f"equipes sem proposta nesta arena: {', '.join(missing)}")
+    round_no = (cfg.refinement.round + 1) if cfg.refinement else 1
+    try:
+        spec = RefinementSpec(parent_run_id=run_id, round=round_no, feedback=body.feedback, general_comment=body.general_comment)
+    except ValueError as exc:
+        raise _err(422, "comment_required", "escreva um comentario geral ou um comentario para cada equipe escolhida") from exc
+    new_cfg = cfg.model_copy(update={"refinement": spec, "action_plan": None})
+    new_run, _, _ = await _create_run(request, session, owner, new_cfg, idempotency_key=None, parent_run_id=run_id)
+    return RunCreateResponse(run_id=new_run.id, status=RunStatus(new_run.status), created=True, links=_links(request, new_run.id))
+
+
+@api.post("/runs/{run_id}/action-plan", response_model=RunCreateResponse, status_code=202)
+async def action_plan_run(request: Request, session: Session, owner: Owner, run_id: str, body: ActionPlanIn) -> RunCreateResponse:
+    """Entrega final: a equipe escolhida (padrao: vencedora) transforma a proposta em plano de acao."""
+    run = await _owned_run(session, owner, run_id)
+    report = await _finished_report(session, run)
+    cfg = ChallengeConfig.model_validate(run.snapshot)
+    if cfg.action_plan is not None:
+        # Sobre um plano pronto: nova versao mais detalhada, da mesma equipe.
+        if report.action_plan is None:
+            raise _err(422, "invalid_parent", "este plano nao foi produzido; peca um novo plano a partir da arena")
+        if not body.instructions.strip():
+            raise _err(422, "detail_required", "diga o que o plano deve detalhar")
+        spec = ActionPlanSpec(parent_run_id=run_id, candidate_id=report.action_plan.candidate_id, instructions=body.instructions)
+        new_run, _, _ = await _create_run(request, session, owner, cfg.model_copy(update={"action_plan": spec}), idempotency_key=None, parent_run_id=run_id)
+        return RunCreateResponse(run_id=new_run.id, status=RunStatus(new_run.status), created=True, links=_links(request, new_run.id))
+    cid = body.candidate_id or report.winner_candidate_id
+    if not cid:
+        raise _err(422, "no_winner", "sem vencedora nesta arena: escolha a equipe que vai montar o plano")
+    if cid not in {p.candidate_id for p in report.proposals}:
+        raise _err(422, "invalid_candidate", f"equipe '{cid}' nao tem proposta nesta arena")
+    spec = ActionPlanSpec(parent_run_id=run_id, candidate_id=cid, instructions=body.instructions)
+    new_cfg = cfg.model_copy(update={"action_plan": spec, "refinement": None})
+    new_run, _, _ = await _create_run(request, session, owner, new_cfg, idempotency_key=None, parent_run_id=run_id)
+    return RunCreateResponse(run_id=new_run.id, status=RunStatus(new_run.status), created=True, links=_links(request, new_run.id))
+
+
+@api.delete("/runs/{run_id}", status_code=204)
+async def delete_run(session: Session, owner: Owner, run_id: str) -> Response:
+    """Exclui uma execucao encerrada e todos os seus registros (eventos, artefatos, chamadas, orcamento)."""
+    run = await _owned_run(session, owner, run_id)
+    if run.status not in TERMINAL_STATUSES:
+        raise _err(409, "not_terminal", "cancele a execucao antes de excluir")
+    for model in (RunEvent, Artifact, CallUsage, BudgetBucket, IdempotencyKey):
+        await session.execute(delete(model).where(model.run_id == run_id))
+    await session.execute(delete(Run).where(Run.id == run_id))
+    await session.commit()
+    return Response(status_code=204)
 
 
 @api.get("/runs/{run_id}/report", responses={200: {"model": Report, "content": {"application/json": {}, "text/markdown": {"schema": {"type": "string"}}}}})

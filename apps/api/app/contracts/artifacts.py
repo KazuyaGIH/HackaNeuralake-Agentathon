@@ -211,6 +211,66 @@ class Proposal(ProposalOutput):
     version: int
     invalid_evidence_ids: list[str] = Field(default_factory=list)
     revised_from_critique: bool = False
+    revised_from_feedback: bool = False
+    call_ids: list[str] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------------- plano de acao (entrega final)
+
+
+class ActionTask(ContractModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task: str = Field(max_length=400)
+    owner: str = Field(default="", max_length=120)
+    deliverable: str = Field(default="", max_length=300)
+
+
+class ActionPhase(ContractModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(max_length=160)
+    duration: str = Field(default="", max_length=80)
+    goal: str = Field(default="", max_length=400)
+    tasks: list[ActionTask] = Field(default_factory=list, max_length=12)
+
+
+class ActionKpi(ContractModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metric: str = Field(max_length=200)
+    target: str = Field(max_length=200)
+
+
+class ActionRisk(ContractModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risk: str = Field(max_length=400)
+    mitigation: str = Field(max_length=400)
+
+
+class ActionPlanOutput(ContractModel):
+    """Saida estruturada da equipe ao transformar a proposta em plano de acao."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(max_length=200)
+    summary: str = Field(max_length=4000)
+    objectives: list[str] = Field(default_factory=list, max_length=10)
+    phases: list[ActionPhase] = Field(default_factory=list, max_length=8)
+    kpis: list[ActionKpi] = Field(default_factory=list, max_length=10)
+    risks: list[ActionRisk] = Field(default_factory=list, max_length=10)
+    budget_estimate: str = Field(default="", max_length=1000)
+    next_steps: list[str] = Field(default_factory=list, max_length=10)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ActionPlan(ActionPlanOutput):
+    candidate_id: str
+    proposal_version: int
+    version: int = 1
+    detail_request: str = Field(default="", description="O que o cliente pediu para detalhar nesta versao.")
+    invalid_evidence_ids: list[str] = Field(default_factory=list)
     call_ids: list[str] = Field(default_factory=list)
 
 
@@ -394,6 +454,7 @@ class Report(ContractModel):
     cost: CostBreakdown
     next_steps: list[str] = Field(default_factory=list)
     judge_shuffle_seed: int | None = None
+    action_plan: ActionPlan | None = None
     diversity_observed: dict[str, list[str]] = Field(
         default_factory=dict, description="provider -> modelos efetivamente informados (ou 'unknown')."
     )

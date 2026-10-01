@@ -36,6 +36,37 @@ def _numbers(excerpt: str) -> list[Decimal]:
     return out
 
 
+def _fmt_num(v: Any) -> str:
+    """Numero no padrao brasileiro: 8000 -> 8.000; 0.5 -> 0,5."""
+    d = Decimal(str(v))
+    if d == d.to_integral_value():
+        return f"{int(d):,}".replace(",", ".")
+    whole, frac = f"{d:.2f}".split(".")
+    return f"{int(whole):,}".replace(",", ".") + "," + frac
+
+
+def _fmt_value(v: Any, unit: str | None) -> str:
+    u = (unit or "").strip()
+    if u.upper() == "BRL":
+        return f"R$ {_fmt_num(v)}"
+    if u.upper() == "USD":
+        return f"US$ {_fmt_num(v)}"
+    return f"{_fmt_num(v)} {u}".strip()
+
+
+def _metric_label(md: dict[str, Any], key: str) -> str:
+    """Nome legivel da metrica: a descricao da restricao correspondente (em minusculas), senao a chave por extenso."""
+    for c in md.get("constraints", []):
+        if c.get("metric_key") == key and c.get("description"):
+            d = str(c["description"])
+            return d[:1].lower() + d[1:]
+    return key.replace("_", " ")
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
 class MockAdapter:
     name = "mock"
 
@@ -57,6 +88,7 @@ class MockAdapter:
             "proposal": self._proposal,
             "critique": self._critique,
             "judge": self._judge,
+            "action_plan": self._action_plan,
         }
         builder = builders.get(request.schema_name)
         if builder is None:
@@ -130,7 +162,7 @@ class MockAdapter:
             return {"strategy_summary": f"{SEAL} estrategia do candidato {idx + 1}", "tasks": tasks[: max_tasks + 1]}
         if "document_research" in allowed and max_tasks >= 1:
             task: dict[str, Any] = {"task_id": "t1", "kind": "document_research", "competence": "pesquisa documental",
-                                    "rationale": f"{SEAL} levantar dados sobre: {focus[:100]}", "query": focus}
+                                    "rationale": f"{SEAL} levantar dados sobre {focus[:100].lower()}", "query": focus}
             if md.get("secondary_model_option"):
                 task["model_tier"] = "secondary"  # busca simples: o pensante delega ao modelo economico
             tasks.append(task)
@@ -147,14 +179,14 @@ class MockAdapter:
             if len(nums) >= 2:
                 unit = constraints[0]["unit"] if constraints else "unid"
                 tasks.append({
-                    "task_id": "t2", "kind": "calculation", "competence": "calculo tipado",
+                    "task_id": "t2", "kind": "calculation", "competence": "cálculo tipado",
                     "rationale": f"{SEAL} somar dois valores encontrados nas fontes",
                     "calculation": {"function": "sum", "unit": unit, "inputs": [
                         {"name": "a", "value": str(nums[0][0]), "unit": unit, "evidence_ids": [nums[0][1]]},
                         {"name": "b", "value": str(nums[1][0]), "unit": unit, "evidence_ids": [nums[1][1]]},
                     ]},
                 })
-        return {"strategy_summary": f"{SEAL} estrategia do candidato {idx + 1}: {md.get('candidate_name')} — {objective[:120]}", "tasks": tasks[:max_tasks]}
+        return {"strategy_summary": f"{SEAL} Estratégia da {md.get('candidate_name')}: {objective[:120]}", "tasks": tasks[:max_tasks]}
 
     def _research(self, req: GenerateRequest) -> dict[str, Any]:
         md = req.metadata
@@ -162,7 +194,7 @@ class MockAdapter:
         for e in md.get("excerpts", [])[:3]:
             first = re.split(r"(?<=[.!?])\s", e["excerpt"].strip())[0][:180]
             findings.append({"claim": f"{SEAL} O trecho indica: {first}", "evidence_ids": [e["evidence_id"]], "confidence": "medium"})
-        return {"findings": findings, "gaps": [f"{SEAL} pesquisa limitada aos trechos recuperados para '{md.get('query', '')[:60]}'"]}
+        return {"findings": findings, "gaps": [f"{SEAL} Pesquisa limitada aos trechos recuperados sobre “{md.get('query', '')[:60]}”."]}
 
     def _metrics_for(self, md: dict[str, Any], version: int) -> dict[str, Any]:
         scenario = md.get("scenario", "default")
@@ -206,26 +238,98 @@ class MockAdapter:
         cited = list(dict.fromkeys(cited))[:8]
         metrics = self._metrics_for(md, version)
         critique = md.get("critique")
+        feedback = md.get("human_feedback")
         revised = version >= 2 and critique is not None
-        approach = ["priorizar equilibrio entre custo, prazo e qualidade", "minimizar custo total respeitando as restricoes",
-                    "priorizar privacidade e robustez", "explorar alternativa nao convencional"][idx % 4]
+        approach = ["equilibrar custo, prazo e qualidade", "minimizar o custo total respeitando as restrições",
+                    "priorizar privacidade e robustez", "explorar uma alternativa não convencional"][idx % 4]
+        n_obj = len(critique.get("objections", [])) if revised else 0
+        declared = "; ".join(f"{_metric_label(md, k)}: {_fmt_value(m['value'], m['unit'])}" for k, m in metrics.items())
+        objective = str(md.get("objective", "")).strip()
+        objective = (objective[:280].rsplit(" ", 1)[0] + "…") if len(objective) > 280 else objective
+        objective = objective if objective.endswith((".", "…")) else objective + "."
         rec = (
-            f"{SEAL} Recomendacao (v{version}) para: {md.get('objective', '')[:200]}. "
-            f"Abordagem: {approach}. "
-            + (f"Revisada apos critica: {len(critique.get('objections', []))} objecao(oes) consideradas. " if revised else "")
-            + "Os valores citados vem exclusivamente do pacote comum de evidencias."
+            f"{SEAL} Recomendação (versão {version}) para {objective[:1].lower() + objective[1:]} "
+            f"Abordagem: {approach}."
+            + (f" Números declarados — {declared}." if declared else "")
+            + (f" Revisada após a crítica: {n_obj} objeç{'ão considerada' if n_obj == 1 else 'ões consideradas'}." if revised else "")
+            + (f" Revisada com o feedback do cliente: “{feedback.get('comment') or feedback.get('general_comment', '')}”." if feedback else "")
+            + " Os valores citados vêm exclusivamente do pacote comum de evidências."
         )
         return {
-            "title": f"{SEAL} Proposta v{version}: {approach}",
+            "title": f"{SEAL} Proposta v{version}: {_cap(approach)}",
             "recommendation": rec,
-            "steps": [f"{SEAL} Passo 1: consolidar requisitos a partir das evidencias", f"{SEAL} Passo 2: validar restricoes obrigatorias com dados citados",
-                      f"{SEAL} Passo 3: plano de implantacao em fases", f"{SEAL} Passo 4: medir resultados e revisar"],
-            "assumptions": [f"{SEAL} precos e prazos dos documentos permanecem validos"] + ([f"{SEAL} objecoes recebidas foram tratadas na revisao"] if revised else []),
-            "tradeoffs": [f"{SEAL} custo x qualidade das respostas", f"{SEAL} prazo x robustez"],
-            "risks": [f"{SEAL} dependencia de fornecedor", f"{SEAL} lacunas nas evidencias"],
+            "steps": [f"{SEAL} Consolidar os requisitos a partir das evidências", f"{SEAL} Validar as restrições obrigatórias com os dados citados",
+                      f"{SEAL} Implantar em fases, começando por um piloto", f"{SEAL} Medir os resultados e revisar o plano"],
+            "assumptions": [f"{SEAL} Preços e prazos dos documentos continuam válidos"] + ([f"{SEAL} As objeções recebidas foram tratadas na revisão"] if revised else [])
+            + ([f"{SEAL} Feedback do cliente incorporado (repescagem {feedback.get('round', 1)})"] if feedback else []),
+            "tradeoffs": [f"{SEAL} Custo × qualidade das respostas", f"{SEAL} Prazo × robustez"],
+            "risks": [f"{SEAL} Dependência de um único fornecedor", f"{SEAL} Lacunas nas evidências disponíveis"],
             "metrics": metrics,
             "evidence_ids": cited,
-            "open_items": [f"{SEAL} confirmar dados nao cobertos pelos documentos"],
+            "open_items": [f"{SEAL} Confirmar os dados que os documentos não cobrem"],
+        }
+
+    def _action_plan(self, req: GenerateRequest) -> dict[str, Any]:
+        md = req.metadata
+        p = md.get("proposal", {})
+        metrics = p.get("metrics") or {}
+        ev = (p.get("evidence_ids") or [])[:4]
+        review = md.get("review") or {}
+        objections = (review.get("objecoes_dos_juizes") or [])[:2]
+        crit = [o.get("point", "") for c in (review.get("criticas_recebidas") or []) for o in c.get("objections", [])][:2]
+        kinds = {c.get("metric_key"): c.get("kind") for c in md.get("constraints", [])}
+        kpis = [
+            {"metric": f"{SEAL} {_cap(_metric_label(md, k))}", "target": f"{'pelo menos' if kinds.get(k) == 'numeric_min' else 'até'} {_fmt_value(m.get('value'), m.get('unit'))}"}
+            for k, m in metrics.items()
+        ]
+        clean = lambda s: str(s).replace(SEAL, "").strip()  # noqa: E731
+        prev = md.get("previous_plan")
+        if prev:
+            # Detalhamento: mantem o plano e aprofunda cada fase com tarefas semanais e metas por fase.
+            ask = str(md.get("plan_instructions", "")).strip().rstrip(".")[:160]
+            version = int(prev.get("version", 1)) + 1
+            phases = []
+            for i, ph in enumerate(prev.get("phases", []), start=1):
+                tasks = list(ph.get("tasks", []))
+                name = clean(ph.get("name", ""))
+                owner = tasks[0]["owner"] if tasks else "Equipe"
+                tasks += [
+                    {"task": f"{SEAL} Semana 1 — {name}: levantar pendências e validar o escopo da fase", "owner": owner, "deliverable": f"Checkpoint {i}.1"},
+                    {"task": f"{SEAL} Semana 2 — {name}: executar, revisar e registrar as decisões", "owner": owner, "deliverable": f"Checkpoint {i}.2"},
+                ]
+                phases.append({**ph, "goal": f"{clean(ph.get('goal', ''))}, com acompanhamento semanal", "tasks": tasks[:12]})
+            share = round(100 / max(1, len(phases)))
+            return {
+                **{k: prev.get(k) for k in ("objectives", "risks", "next_steps", "evidence_ids")},
+                "title": f"{SEAL} Plano de ação v{version}: {clean(p.get('title', 'proposta')).split(': ', 1)[-1][:100]}",
+                "summary": f"{SEAL} Versão {version}, mais detalhada a pedido do cliente ({ask[:1].lower() + ask[1:]}). " + clean(prev.get("summary", ""))[:600],
+                "phases": phases,
+                "kpis": (list(prev.get("kpis", [])) + [{"metric": f"{SEAL} Entregas da fase “{clean(ph['name'])}” no prazo", "target": "100%"} for ph in phases])[:10],
+                "budget_estimate": f"{SEAL} Distribuição estimada por fase: " + "; ".join(f"{clean(ph['name'])} ≈ {share}%" for ph in phases) + ".",
+            }
+        limits = "; ".join(f"{_metric_label(md, k)}: {_fmt_value(m.get('value'), m.get('unit'))}" for k, m in metrics.items())
+        return {
+            "title": f"{SEAL} Plano de ação: {clean(p.get('title', 'proposta')).split(': ', 1)[-1][:120]}",
+            "summary": f"{SEAL} Plano para executar a proposta (versão {p.get('version', 1)}) em fases curtas, com metas mensuráveis e riscos tratados."
+                       + (f" Pedido do cliente considerado: {str(md.get('plan_instructions')).strip().rstrip('.')[:160]}." if md.get("plan_instructions") else ""),
+            "objectives": [f"{SEAL} Entregar o piloto dentro das restrições obrigatórias", f"{SEAL} Validar a qualidade com usuários reais", f"{SEAL} Decidir a expansão com base em dados"],
+            "phases": [
+                {"name": f"{SEAL} Preparação", "duration": "2 semanas", "goal": "Alinhar o escopo e contratar", "tasks": [
+                    {"task": f"{SEAL} Aprovar o escopo e o orçamento", "owner": "Patrocinador", "deliverable": "Termo de abertura"},
+                    {"task": f"{SEAL} Contratar o fornecedor e montar a equipe", "owner": "Compras + TI", "deliverable": "Contrato assinado"}]},
+                {"name": f"{SEAL} Piloto", "duration": "6 semanas", "goal": "Colocar no ar para um grupo restrito", "tasks": [
+                    {"task": f"{SEAL} Integrar os documentos e configurar", "owner": "TI", "deliverable": "Ambiente de piloto"},
+                    {"task": f"{SEAL} Treinar os usuários-chave", "owner": "RH", "deliverable": "Turma treinada"}]},
+                {"name": f"{SEAL} Avaliação e expansão", "duration": "4 semanas", "goal": "Medir os resultados e decidir", "tasks": [
+                    {"task": f"{SEAL} Medir os KPIs e coletar feedback", "owner": "Produto", "deliverable": "Relatório do piloto"},
+                    {"task": f"{SEAL} Decidir a expansão", "owner": "Comitê", "deliverable": "Decisão registrada"}]},
+            ],
+            "kpis": kpis + [{"metric": f"{SEAL} Satisfação dos usuários do piloto", "target": "pelo menos 4 de 5"}],
+            "risks": [{"risk": f"{SEAL} {_cap(clean(o))}", "mitigation": f"{SEAL} Tratar no plano da fase de piloto"} for o in objections + crit]
+                     or [{"risk": f"{SEAL} Atraso do fornecedor", "mitigation": f"{SEAL} Marcos contratuais com multa"}],
+            "budget_estimate": f"{SEAL} Dentro dos limites declarados na proposta" + (f" — {limits}." if limits else "."),
+            "next_steps": [f"{SEAL} Apresentar o plano ao patrocinador", f"{SEAL} Aprovar a fase de preparação", f"{SEAL} Agendar o kick-off"],
+            "evidence_ids": ev,
         }
 
     def _critique(self, req: GenerateRequest) -> dict[str, Any]:
@@ -234,17 +338,19 @@ class MockAdapter:
         objections = []
         for c in self._numeric_constraints(md):
             m = (target.get("metrics") or {}).get(c["metric_key"])
+            label = _metric_label(md, c["metric_key"])
             if m is None:
-                objections.append({"point": f"{SEAL} A proposta nao declara a metrica '{c['metric_key']}' exigida pela restricao.", "severity": "medium", "evidence_ids": [], "constraint_id": c["constraint_id"]})
+                objections.append({"point": f"{SEAL} A proposta não informa o {label}, exigido pela regra.", "severity": "medium", "evidence_ids": [], "constraint_id": c["constraint_id"]})
                 continue
             value = Decimal(str(m["value"]))
             limit = Decimal(str(c["limit"]))
             violated = value > limit if c["kind"] == "numeric_max" else value < limit
             if violated:
-                objections.append({"point": f"{SEAL} Conflito com restricao '{c['constraint_id']}': {value} {c['unit']} viola o limite {limit} {c['unit']}.",
+                limit_word = "o máximo" if c["kind"] == "numeric_max" else "o mínimo"
+                objections.append({"point": f"{SEAL} Quebra a regra “{c['description']}”: {_fmt_value(value, c['unit'])}, quando {limit_word} é {_fmt_value(limit, c['unit'])}.",
                                    "severity": "high", "evidence_ids": m.get("evidence_ids", []), "constraint_id": c["constraint_id"]})
-        objections.append({"point": f"{SEAL} As premissas nao explicitam o horizonte temporal dos custos.", "severity": "low", "evidence_ids": (target.get("evidence_ids") or [])[:1], "constraint_id": None})
-        return {"objections": objections, "strengths": [f"{SEAL} cita evidencias por ID", f"{SEAL} passos claros"]}
+        objections.append({"point": f"{SEAL} As premissas não deixam claro o horizonte de tempo dos custos.", "severity": "low", "evidence_ids": (target.get("evidence_ids") or [])[:1], "constraint_id": None})
+        return {"objections": objections, "strengths": [f"{SEAL} Cita evidências por ID", f"{SEAL} Passos claros"]}
 
     def _judge(self, req: GenerateRequest) -> dict[str, Any]:
         md = req.metadata
@@ -271,11 +377,14 @@ class MockAdapter:
                             lim = Decimal(str(c["limit"]))
                             if (v > lim) if c["kind"] == "numeric_max" else (v < lim):
                                 g = min(g, 4)
-                grades.append({"criterion_id": cid, "grade": str(g), "justification": f"{SEAL} {label}: avaliacao de '{cid}' com base nas evidencias citadas.", "evidence_ids": (p.get("evidence_ids") or [])[:2]})
+                name = (md.get("criteria_names") or {}).get(cid, cid.replace("_", " "))
+                tone = "forte" if g >= 9 else "bom" if g >= 7 else "regular" if g >= 5 else "fraco"
+                grades.append({"criterion_id": cid, "grade": str(g), "justification": f"{SEAL} Desempenho {tone} em “{name}”, com base nas evidências citadas.",
+                               "evidence_ids": (p.get("evidence_ids") or [])[:2]})
             if scenario == "judge_invalid_then_valid" and req.attempt == 1 and grades:
                 grades[0]["grade"] = "12"
             if scenario == "judge_fails" and grades:
                 grades = grades[1:]
-            evaluations.append({"label": label, "grades": grades, "objections": [f"{SEAL} objecao residual sobre {label}"],
-                                "assumptions": [f"{SEAL} evidencias refletem o cenario atual"], "uncertainties": [f"{SEAL} custos reais podem variar"]})
+            evaluations.append({"label": label, "grades": grades, "objections": [f"{SEAL} Confirmar os custos com o fornecedor antes de contratar"],
+                                "assumptions": [f"{SEAL} As evidências refletem o cenário atual"], "uncertainties": [f"{SEAL} Os custos reais podem variar"]})
         return {"evaluations": evaluations}

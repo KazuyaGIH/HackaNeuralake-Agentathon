@@ -274,6 +274,90 @@ async def test_secondary_model_handles_internal_tasks_and_reports_savings(client
     assert any(r["candidate_id"] == "c1" and r["model_tier"] == "secondary" for r in results)
 
 
+async def test_refinement_is_a_repechage_only_selected_teams_continue(client: httpx.AsyncClient) -> None:
+    cfg = await demo_config(client)
+    cfg["candidate_count"] = 3
+    run_id = await create_run(client, cfg)
+    await wait_terminal(client, run_id)
+    report = (await client.get(f"/api/v1/runs/{run_id}/report")).json()
+    v_before = {p["candidate_id"]: p["version"] for p in report["proposals"]}
+    fb = [{"candidate_id": "c1", "comment": "Detalhe melhor o cronograma do piloto."}, {"candidate_id": "c2", "comment": "Reduza o custo."}]
+    r = await client.post(f"/api/v1/runs/{run_id}/refine", json={"feedback": fb, "general_comment": "Foco em prazo."})
+    assert r.status_code == 202, r.text
+    child = r.json()["run_id"]
+    d2 = await wait_terminal(client, child)
+    rep2 = (await client.get(f"/api/v1/runs/{child}/report")).json()
+    assert d2["status"] == "completed", d2["error"]
+    assert d2["parent_run_id"] == run_id and d2["snapshot"]["refinement"]["round"] == 1
+    # Repescagem: so c1 e c2 seguem; c3 fica de fora do ranking, das avaliacoes e do orcamento.
+    p2 = {p["candidate_id"]: p for p in rep2["proposals"]}
+    assert set(p2) == {"c1", "c2"}
+    assert p2["c1"]["version"] == v_before["c1"] + 1 and p2["c1"]["revised_from_feedback"] is True
+    assert "cronograma do piloto" in p2["c1"]["recommendation"]
+    assert {e["candidate_id"] for e in rep2["ranking"]} == {"c1", "c2"}
+    assert {e["candidate_id"] for e in rep2["evaluations"]} == {"c1", "c2"}
+    assert {b["bucket_key"] for b in d2["budget_buckets"]} == {"common", "candidate:c1", "candidate:c2"}
+    calls = d2["artifacts"]["calls"]
+    assert {c["candidate_id"] for c in calls if c["role"] == "thinker"} == {"c1", "c2"}
+    assert rep2["decision_status"] in ("ranked", "tie")
+    # Comentario: geral para todos OU especifico por equipe; sem nenhum dos dois e recusado.
+    none = await client.post(f"/api/v1/runs/{child}/refine", json={"feedback": [{"candidate_id": "c1"}, {"candidate_id": "c2", "comment": "x"}]})
+    assert none.status_code == 422 and none.json()["detail"]["code"] == "comment_required"
+    general_only = await client.post(f"/api/v1/runs/{child}/refine", json={"feedback": [{"candidate_id": "c1"}, {"candidate_id": "c2"}], "general_comment": "Mais concreto."})
+    assert general_only.status_code == 202, general_only.text
+    assert (await wait_terminal(client, general_only.json()["run_id"]))["status"] == "completed"
+    # Segunda rodada so com uma equipe; quem saiu nao pode voltar.
+    out = await client.post(f"/api/v1/runs/{child}/refine", json={"feedback": [{"candidate_id": "c3", "comment": "volta"}]})
+    assert out.status_code == 422
+    r3 = await client.post(f"/api/v1/runs/{child}/refine", json={"feedback": [{"candidate_id": "c2", "comment": "Mais barato ainda."}]})
+    d3 = await wait_terminal(client, r3.json()["run_id"])
+    rep3 = (await client.get(f"/api/v1/runs/{r3.json()['run_id']}/report")).json()
+    assert d3["snapshot"]["refinement"]["round"] == 2 and d3["status"] == "completed"
+    assert [e["candidate_id"] for e in rep3["ranking"]] == ["c2"]
+    # Plano de acao depois de repescagem: concluido (quem saiu nao conta como proposta faltando).
+    rp = await client.post(f"/api/v1/runs/{r3.json()['run_id']}/action-plan", json={})
+    dp = await wait_terminal(client, rp.json()["run_id"])
+    assert dp["status"] == "completed", dp["error"]
+    md = (await client.get(f"/api/v1/runs/{child}/report", params={"format": "md"})).text
+    assert "Repescagem 1" in md and "Fora da disputa: Equipe Robustez" in md
+
+
+async def test_action_plan_for_winner_and_validation(client: httpx.AsyncClient) -> None:
+    run_id, detail, report = await run_demo(client)
+    winner = report["winner_candidate_id"]
+    bad = await client.post(f"/api/v1/runs/{run_id}/refine", json={"feedback": [{"candidate_id": "c9", "comment": "x"}]})
+    assert bad.status_code == 422
+    r = await client.post(f"/api/v1/runs/{run_id}/action-plan", json={"instructions": "Plano em 3 meses."})
+    assert r.status_code == 202, r.text
+    child = r.json()["run_id"]
+    d2 = await wait_terminal(client, child)
+    rep2 = (await client.get(f"/api/v1/runs/{child}/report")).json()
+    assert d2["status"] == "completed", d2["error"]
+    plan = rep2["action_plan"]
+    assert plan and plan["candidate_id"] == winner and plan["phases"] and plan["kpis"] and plan["risks"]
+    assert rep2["winner_candidate_id"] == winner and rep2["ranking"] == report["ranking"]
+    assert [c["stage"] for c in d2["artifacts"]["calls"]] == ["action_plan"]
+    md = (await client.get(f"/api/v1/runs/{child}/report", params={"format": "md"})).text
+    assert "## Plano de acao" in md
+    # Detalhar mais: exige o que detalhar e gera a versao 2, da mesma equipe, mais detalhada.
+    assert (await client.post(f"/api/v1/runs/{child}/action-plan", json={})).status_code == 422
+    r2 = await client.post(f"/api/v1/runs/{child}/action-plan", json={"instructions": "Detalhe o piloto semana a semana."})
+    assert r2.status_code == 202, r2.text
+    d3 = await wait_terminal(client, r2.json()["run_id"])
+    plan2 = (await client.get(f"/api/v1/runs/{r2.json()['run_id']}/report")).json()["action_plan"]
+    assert d3["status"] == "completed" and plan2["version"] == 2 and plan2["candidate_id"] == winner
+    assert plan2["detail_request"] == "Detalhe o piloto semana a semana."
+    assert sum(len(p["tasks"]) for p in plan2["phases"]) > sum(len(p["tasks"]) for p in plan["phases"])
+
+
+async def test_delete_run_removes_everything(client: httpx.AsyncClient) -> None:
+    run_id, _, _ = await run_demo(client)
+    r = await client.delete(f"/api/v1/runs/{run_id}")
+    assert r.status_code == 204
+    assert (await client.get(f"/api/v1/runs/{run_id}")).status_code == 404
+    assert run_id not in {x["run_id"] for x in (await client.get("/api/v1/runs")).json()}
+
+
 async def test_secondary_model_must_exist(client: httpx.AsyncClient) -> None:
     cfg = await demo_config(client)
     cfg["config_mode"] = "manual"
