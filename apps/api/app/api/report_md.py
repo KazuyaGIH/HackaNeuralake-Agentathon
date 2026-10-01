@@ -38,11 +38,20 @@ def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
     lines += [f"- {_t(r)}" for r in report.decision_reasons] or ["- (nenhum)"]
     lines.append("")
     lines.append("## Ranking")
-    crit_ids = [c.criterion_id for c in snapshot.rubric.criteria]
-    lines.append("| # | Candidato | Score 0-100 | Elegibilidade | " + " | ".join(_t(c) for c in crit_ids) + " |")
-    lines.append("|---|---|---|---|" + "---|" * len(crit_ids))
+    judges = snapshot.judges or []
+    if len(judges) > 1:
+        # Painel: uma coluna por juiz (nota 0-100 do juiz); a nota final e a media ponderada pelos pesos.
+        cols = [f"{j.name} (peso {j.weight})" for j in judges]
+        cell = lambda e, i: _fmt(e.judge_scores[i].score_0_100 if i < len(e.judge_scores) else None)  # noqa: E731
+    else:
+        rubric = judges[0].rubric if judges and judges[0].rubric else snapshot.rubric
+        crit_ids = [c.criterion_id for c in rubric.criteria]
+        cols = crit_ids
+        cell = lambda e, i: _fmt(e.grades.get(crit_ids[i]))  # noqa: E731
+    lines.append("| # | Candidato | Score 0-100 | Elegibilidade | " + " | ".join(_t(c) for c in cols) + " |")
+    lines.append("|---|---|---|---|" + "---|" * len(cols))
     for e in sorted(report.ranking, key=lambda e: (e.rank is None, e.rank or 0, e.candidate_id)):
-        grades = " | ".join(_fmt(e.grades.get(c)) for c in crit_ids)
+        grades = " | ".join(cell(e, i) for i in range(len(cols)))
         rank = f"{e.rank}{'*' if e.co_leader else ''}" if e.rank else "-"
         lines.append(f"| {rank} | {_t(e.candidate_name)} | {_fmt(e.score_0_100)} | {e.eligibility} | {grades} |")
     lines.append("")
@@ -82,10 +91,11 @@ def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
                 lines.append(f"- [{o.severity}] {_t(o.point)}" + (f" (restricao `{_t(o.constraint_id)}`)" if o.constraint_id else ""))
             lines.append("")
     if report.evaluations:
-        lines.append("## Avaliacao do Judge")
+        lines.append("## Avaliacao dos juizes" if len(judges) > 1 else "## Avaliacao do Judge")
         lines.append(f"Ordem embaralhada com seed {report.judge_shuffle_seed}; propostas anonimizadas.")
         for ev in report.evaluations:
-            lines.append(f"### {_t(names.get(ev.candidate_id, ev.candidate_id))} ({ev.judge_label})")
+            who = f" — {_t(ev.judge_name)}" if len(judges) > 1 else ""
+            lines.append(f"### {_t(names.get(ev.candidate_id, ev.candidate_id))} ({ev.judge_label}){who}")
             for g in ev.grades:
                 lines.append(f"- `{_t(g.criterion_id)}`: {g.grade} — {_t(g.justification)}")
             for title, items in (("Objecoes", ev.objections), ("Hipoteses", ev.assumptions), ("Incertezas", ev.uncertainties)):
@@ -97,7 +107,10 @@ def render_markdown(report: Report, snapshot: ChallengeConfig) -> str:
     lines.append(f"- Total: {c.total} {c.currency} (qualidade: {c.quality}; chamadas: {c.calls_used}/{c.calls_cap}; teto: {_fmt(c.cap)}; estrito: {c.strict})")
     lines.append(f"- Comum (preparacao + Judge): {c.common} · Judge: {c.judge}")
     for cid, v in c.per_candidate.items():
-        lines.append(f"- {_t(names.get(cid, cid))}: {v}")
+        extra = ""
+        if c.secondary_calls.get(cid):
+            extra = f" · {c.secondary_calls[cid]} chamada(s) no modelo economico, economia estimada {c.secondary_savings.get(cid, 0)}"
+        lines.append(f"- {_t(names.get(cid, cid))}: {v}{extra}")
     if c.pending_unknown_reserved > 0:
         lines.append(f"- Reservas pendentes (consumo desconhecido): {c.pending_unknown_reserved}")
     lines.append("")

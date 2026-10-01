@@ -42,8 +42,17 @@ class CatalogPreset(ContractModel):
     description: str
     instructions: str
     model_option_by_provider: dict[str, str]
+    secondary_by_provider: dict[str, str] = Field(default_factory=dict)
     allowed_specialists: list[str]
     max_specialist_tasks: int
+
+
+class CatalogJudgePersona(ContractModel):
+    persona: str
+    name: str
+    description: str
+    instructions: str
+    rubric: dict[str, Any]
 
 
 class CatalogResponse(ContractModel):
@@ -56,6 +65,7 @@ class CatalogResponse(ContractModel):
     presets: list[CatalogPreset]
     limits: dict[str, Any]
     default_rubric: dict[str, Any]
+    judge_personas: list[CatalogJudgePersona] = Field(default_factory=list)
     mock_scenarios: list[str]
     demo_preset_available: bool
 

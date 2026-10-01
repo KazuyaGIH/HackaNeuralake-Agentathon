@@ -58,7 +58,10 @@ def anonymize(proposals: list[Proposal], verifications: dict[str, Verification],
     return anon, anon_ver, label_map
 
 
-def parse_judge_output(raw: dict[str, Any], rubric: Rubric, label_map: dict[str, str], proposals: dict[str, Proposal], rubric_hash: str, pack_version: int, call_ids: list[str]) -> list[Evaluation]:
+def parse_judge_output(
+    raw: dict[str, Any], rubric: Rubric, label_map: dict[str, str], proposals: dict[str, Proposal], rubric_hash: str, pack_version: int, call_ids: list[str],
+    *, judge_id: str = "j1", judge_name: str = "Padrão",
+) -> list[Evaluation]:
     out = JudgeOutput.model_validate(raw)
     expected = {c["criterion_id"] for c in judge_criteria(rubric)}
     seen_labels: set[str] = set()
@@ -81,7 +84,7 @@ def parse_judge_output(raw: dict[str, Any], rubric: Rubric, label_map: dict[str,
         cid = label_map[ev.label]
         evaluations.append(
             Evaluation(
-                candidate_id=cid, proposal_version=proposals[cid].version, judge_label=ev.label, rubric_hash=rubric_hash,
+                candidate_id=cid, proposal_version=proposals[cid].version, judge_id=judge_id, judge_name=judge_name, judge_label=ev.label, rubric_hash=rubric_hash,
                 pack_version=pack_version, grades=ev.grades, objections=ev.objections, assumptions=ev.assumptions,
                 uncertainties=ev.uncertainties, status="complete", call_ids=call_ids,
             )

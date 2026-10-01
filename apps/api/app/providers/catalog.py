@@ -6,18 +6,21 @@ from app import APP_VERSION
 from app.budget.prices import NEURALAKE_OPTIONS, PriceTable
 from app.config import Settings
 from app.contracts.challenge import (
+    JUDGE_PERSONAS,
     MAX_ATTEMPTS,
     MAX_CANDIDATES,
     MAX_CONCURRENT_CALLS,
     MAX_CRITIQUE_ROUNDS,
+    MAX_JUDGES,
     MAX_SOURCES,
     MAX_SPECIALIST_TASKS,
     MAX_TOTAL_CALLS,
     MIN_CANDIDATES,
     default_rubric,
+    persona_rubric,
 )
 from app.contracts.common import Provider, SpecialistKind
-from app.contracts.runs import CatalogModelOption, CatalogPreset, CatalogResponse
+from app.contracts.runs import CatalogJudgePersona, CatalogModelOption, CatalogPreset, CatalogResponse
 
 CATALOG_VERSION = "2026-09-30.1"
 
@@ -79,6 +82,8 @@ class PresetSpec:
     allowed_specialists: tuple[SpecialistKind, ...] = (SpecialistKind.DOCUMENT_RESEARCH, SpecialistKind.CALCULATION)
     max_specialist_tasks: int = MAX_SPECIALIST_TASKS
     color: str = "#2563eb"
+    # Modelo economico por provedor para tarefas internas simples; ausente = equipe usa so o principal.
+    secondary_by_provider: dict[str, str] = field(default_factory=dict)
 
 
 PRESETS: list[PresetSpec] = [
@@ -90,6 +95,7 @@ PRESETS: list[PresetSpec] = [
         "evidencia. Registre hipoteses e lacunas explicitamente.",
         {"mock": "mock-default", "neuralake": "auto"},
         color="#2563eb",
+        secondary_by_provider={"mock": "mock-cheap", "neuralake": "text"},
     ),
     PresetSpec(
         "cost", "Custo",
@@ -108,6 +114,7 @@ PRESETS: list[PresetSpec] = [
         "planos de contingencia, sempre com evidencias por ID.",
         {"mock": "mock-reasoning", "neuralake": "reasoning"},
         color="#d97706",
+        secondary_by_provider={"mock": "mock-cheap", "neuralake": "text"},
     ),
     PresetSpec(
         "explorer", "Exploracao",
@@ -116,6 +123,7 @@ PRESETS: list[PresetSpec] = [
         "uma alternativa nao convencional e compare-a com a opcao dominante usando evidencias por ID.",
         {"mock": "mock-default", "neuralake": "reasoning-pro"},
         color="#9333ea",
+        secondary_by_provider={"mock": "mock-cheap", "neuralake": "text"},
     ),
 ]
 
@@ -197,6 +205,7 @@ class Catalog:
                 CatalogPreset(
                     preset=p.preset, label=p.label, description=p.description, instructions=p.instructions,
                     model_option_by_provider=p.model_option_by_provider,
+                    secondary_by_provider=p.secondary_by_provider,
                     allowed_specialists=[str(k) for k in p.allowed_specialists],
                     max_specialist_tasks=p.max_specialist_tasks,
                 )
@@ -204,6 +213,7 @@ class Catalog:
             ],
             limits={
                 "candidates": {"min": MIN_CANDIDATES, "max": MAX_CANDIDATES, "default": 2},
+                "judges": {"min": 1, "max": MAX_JUDGES, "default": 1},
                 "specialist_tasks_per_candidate": {"max": MAX_SPECIALIST_TASKS, "default": 2},
                 "critique_rounds": {"max": MAX_CRITIQUE_ROUNDS, "default": 1},
                 "concurrent_calls": {"max": MAX_CONCURRENT_CALLS, "default": 2},
@@ -214,6 +224,11 @@ class Catalog:
                 "sources": {"max": MAX_SOURCES, "max_upload_mb": self.settings.max_upload_mb, "max_pdf_pages": self.settings.max_pdf_pages},
             },
             default_rubric=default_rubric().model_dump(mode="json"),
+            judge_personas=[
+                CatalogJudgePersona(persona=key, name=p["name"], description=p["description"], instructions=p["instructions"],
+                                    rubric=persona_rubric(key).model_dump(mode="json"))
+                for key, p in JUDGE_PERSONAS.items()
+            ],
             mock_scenarios=MOCK_SCENARIOS,
             demo_preset_available=demo_available,
         )

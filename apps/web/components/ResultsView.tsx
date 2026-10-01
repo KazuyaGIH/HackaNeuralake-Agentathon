@@ -12,7 +12,13 @@ export default function ResultsView({ report, detail, onEvidence }: Props) {
   const candidates = detail.snapshot.candidates ?? [];
   const nameOf = (id: string) => candidates.find((c) => c.candidate_id === id)?.name ?? id;
   const colorOf = (id: string) => candidates.find((c) => c.candidate_id === id)?.color ?? "#2563eb";
-  const criteria = detail.snapshot.rubric.criteria;
+  const judges = detail.snapshot.judges ?? [];
+  const panel = judges.length > 1;
+  const criteria = (judges[0]?.rubric ?? detail.snapshot.rubric).criteria;
+  const criteriaOf = (judgeId: string) => (judges.find((j) => j.judge_id === judgeId)?.rubric ?? detail.snapshot.rubric).criteria;
+  const columns = panel
+    ? judges.map((j) => ({ key: j.judge_id ?? j.name, title: j.name, sub: `peso ${j.weight}`, hint: j.instructions }))
+    : criteria.map((c) => ({ key: c.criterion_id, title: c.name, sub: String(c.weight), hint: c.description }));
   const ranking = [...report.ranking].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || a.candidate_id.localeCompare(b.candidate_id));
   const finalProposals = report.proposals;
   const Chips = ({ ids }: { ids: string[] }) => (
@@ -61,9 +67,9 @@ export default function ResultsView({ report, detail, onEvidence }: Props) {
               <th>Candidato</th>
               <th className="num">Score 0–100</th>
               <th>Elegibilidade</th>
-              {criteria.map((c) => (
-                <th key={c.criterion_id} className="num" title={c.description}>
-                  {c.name} <span className="muted">({String(c.weight)})</span>
+              {columns.map((c) => (
+                <th key={c.key} className="num" title={c.hint}>
+                  {c.title} <span className="muted">({c.sub})</span>
                 </th>
               ))}
             </tr>
@@ -90,16 +96,22 @@ export default function ResultsView({ report, detail, onEvidence }: Props) {
                 <td>
                   <span className={`badge ${ELIG_CLASS[e.eligibility]}`}>{ELIGIBILITY_LABEL[e.eligibility]}</span>
                 </td>
-                {criteria.map((c) => (
-                  <td key={c.criterion_id} className="num">
-                    {num(e.grades[c.criterion_id], 1)}
-                    {c.computed_by === "server_efficiency" && e.efficiency && (
-                      <div className="hint">
-                        {money(e.efficiency.cost, report.cost.currency)} / {money(e.efficiency.quota, report.cost.currency)}
-                      </div>
-                    )}
-                  </td>
-                ))}
+                {panel
+                  ? judges.map((j) => (
+                      <td key={j.judge_id ?? j.name} className="num">
+                        {num(e.judge_scores.find((s) => s.judge_id === j.judge_id)?.score_0_100)}
+                      </td>
+                    ))
+                  : criteria.map((c) => (
+                      <td key={c.criterion_id} className="num">
+                        {num(e.grades[c.criterion_id], 1)}
+                        {c.computed_by === "server_efficiency" && e.efficiency && (
+                          <div className="hint">
+                            {money(e.efficiency.cost, report.cost.currency)} / {money(e.efficiency.quota, report.cost.currency)}
+                          </div>
+                        )}
+                      </td>
+                    ))}
               </tr>
             ))}
           </tbody>
@@ -206,21 +218,19 @@ export default function ResultsView({ report, detail, onEvidence }: Props) {
 
       {report.evaluations.length > 0 && (
         <section className="panel">
-          <h2 style={{ marginTop: 0 }}>Avaliação do Judge</h2>
+          <h2 style={{ marginTop: 0 }}>{panel ? "Avaliação dos juízes" : "Avaliação do Judge"}</h2>
           <p className="hint">Propostas anonimizadas e embaralhadas com seed {report.judge_shuffle_seed}; justificativas são resumos verificáveis, não cadeia de pensamento.</p>
           <div className="grid two">
             {report.evaluations.map((ev) => (
-              <div key={ev.candidate_id} className="card" style={{ borderLeftColor: colorOf(ev.candidate_id) }}>
+              <div key={`${ev.candidate_id}:${ev.judge_id}`} className="card" style={{ borderLeftColor: colorOf(ev.candidate_id) }}>
                 <h3>
-                  {nameOf(ev.candidate_id)} <span className="muted">({ev.judge_label})</span>
+                  {nameOf(ev.candidate_id)} <span className="muted">({ev.judge_label})</span> {panel && <span className="badge accent">{ev.judge_name}</span>}
                 </h3>
                 <table>
                   <tbody>
                     {ev.grades.map((g) => (
                       <tr key={g.criterion_id}>
-                        <td>
-                          <code>{g.criterion_id}</code>
-                        </td>
+                        <td>{criteriaOf(ev.judge_id).find((c) => c.criterion_id === g.criterion_id)?.name ?? <code>{g.criterion_id}</code>}</td>
                         <td className="num">
                           <strong>{num(g.grade, 1)}</strong>
                         </td>

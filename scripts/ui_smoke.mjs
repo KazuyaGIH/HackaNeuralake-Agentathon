@@ -1,4 +1,4 @@
-// Smoke da interface com Playwright: formulario -> exemplo -> iniciar -> acompanhar -> resultado -> historico.
+// Smoke da interface com Playwright: projetos -> exemplo -> iniciar -> acompanhar -> resultado -> historico.
 // Uso: node scripts/ui_smoke.mjs [baseUrl] [outDir]   (requer `npm i playwright` e `npx playwright install chromium`)
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -14,11 +14,11 @@ page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
 
 await page.goto(base, { waitUntil: "networkidle" });
-await page.getByRole("button", { name: /Carregar exemplo/ }).click();
-await page.waitForFunction(() => (document.querySelector("textarea")?.value?.length ?? 0) > 20);
+await page.getByRole("button", { name: /Criar exemplo/ }).first().click();
+await page.waitForURL(/\/projetos\//, { timeout: 15000 });
+await page.waitForSelector("text=Configuração", { timeout: 15000 });
 await page.screenshot({ path: `${out}/01-form.png`, fullPage: true });
 await page.getByRole("button", { name: /Iniciar arena/ }).click();
-await page.waitForURL(/\/runs\//, { timeout: 15000 });
 await page.waitForSelector("text=Candidatos", { timeout: 15000 });
 await page.screenshot({ path: `${out}/02-running.png`, fullPage: true });
 await page.waitForSelector("text=Resultado", { timeout: 60000 });
@@ -32,6 +32,7 @@ await page.screenshot({ path: `${out}/04-evidence.png`, fullPage: false });
 const url = page.url();
 const callsBefore = await page.locator("dl.kv dd").first().innerText();
 await page.reload({ waitUntil: "networkidle" });
+await page.locator(".side-item.run").first().click();
 await page.waitForSelector("text=Resultado", { timeout: 30000 });
 const callsAfter = await page.locator("dl.kv dd").first().innerText();
 await page.goto(`${base}/runs`, { waitUntil: "networkidle" });

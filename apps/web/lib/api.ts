@@ -5,6 +5,9 @@ import type { components } from "./api-types";
 export type ChallengeConfig = components["schemas"]["ChallengeConfig-Output"];
 export type CandidateConfig = components["schemas"]["CandidateConfig-Output"];
 export type Constraint = components["schemas"]["Constraint-Output"];
+export type JudgeConfig = components["schemas"]["JudgeConfig-Output"];
+export type Rubric = components["schemas"]["Rubric-Output"];
+export type JudgePersona = components["schemas"]["CatalogJudgePersona"];
 export type CatalogResponse = Omit<components["schemas"]["CatalogResponse"], "limits" | "specialists" | "providers"> & {
   limits: Record<string, Record<string, number>>;
   specialists: { kind: string; label: string; description: string; uses_inference: boolean }[];

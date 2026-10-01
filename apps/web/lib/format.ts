@@ -17,6 +17,17 @@ export function when(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString("pt-BR");
 }
 
+export function ago(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "agora";
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
+  const d = Math.floor(s / 86400);
+  if (d < 30) return `há ${d} dia${d > 1 ? "s" : ""}`;
+  return new Date(iso).toLocaleDateString("pt-BR");
+}
+
 export function elapsed(start?: string | null, end?: string | null): string {
   if (!start) return "—";
   const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime();

@@ -16,7 +16,7 @@ from app.budget.ledger import COMMON_BUCKET, BudgetDenied, Ledger, candidate_buc
 from app.budget.prices import NEURALAKE_OPTIONS, from_nano, to_nano
 from app.config import Settings
 from app.contracts.artifacts import Critique, Evaluation, EvidencePack, Proposal, TaskPlan, TaskResult, Verification
-from app.contracts.challenge import CandidateConfig, ChallengeConfig
+from app.contracts.challenge import CandidateConfig, ChallengeConfig, JudgeConfig
 from app.contracts.common import CostQuality, Provider, UsageQuality
 from app.providers.base import GenerateRequest, GenerateResult, ProviderAdapter, ProviderError
 from app.providers.catalog import Catalog
@@ -72,7 +72,7 @@ class RunContext:
     proposals: dict[str, Proposal] = field(default_factory=dict)
     critiques: list[Critique] = field(default_factory=list)
     verifications: dict[str, Verification] = field(default_factory=dict)
-    evaluations: dict[str, Evaluation] = field(default_factory=dict)
+    evaluations: dict[str, dict[str, Evaluation]] = field(default_factory=dict)  # judge_id -> candidate_id -> Evaluation
     judge_shuffle_seed: int | None = None
     judge_error: str | None = None
     reported_models: dict[str, set[str]] = field(default_factory=dict)
@@ -86,6 +86,14 @@ class RunContext:
     @property
     def candidates(self) -> list[CandidateConfig]:
         return list(self.snapshot.candidates or [])
+
+    @property
+    def judges(self) -> list[JudgeConfig]:
+        """Painel resolvido no intake; snapshots antigos (juiz unico) caem no juiz legado com a rubrica do desafio."""
+        if self.snapshot.judges:
+            return list(self.snapshot.judges)
+        legacy = self.snapshot.judge or JudgeConfig()
+        return [legacy.model_copy(update={"judge_id": legacy.judge_id or "j1", "rubric": legacy.rubric or self.snapshot.rubric})]
 
     def candidate(self, cid: str) -> CandidateConfig:
         return next(c for c in self.candidates if c.candidate_id == cid)
@@ -175,6 +183,27 @@ class RunContext:
             "calls_used": len(calls),
             "pending_unknown": from_nano(sum(b.pending_unknown_nano for b in buckets)) or Decimal("0"),
         }
+
+    async def secondary_usage(self) -> tuple[dict[str, int], dict[str, Decimal]]:
+        """Chamadas no modelo economico por candidato e economia estimada vs. o mesmo uso no modelo principal."""
+        async with self.db.session() as s:
+            calls = list((await s.execute(select(CallUsage).where(CallUsage.run_id == self.run_id))).scalars())
+        counts: dict[str, int] = {}
+        savings: dict[str, Decimal] = {}
+        for c in calls:
+            cand = next((x for x in self.candidates if x.candidate_id == c.candidate_id), None)
+            if cand is None or not cand.secondary_model_option or c.requested_option != cand.secondary_model_option or c.requested_option == cand.model_option:
+                continue
+            cid = cand.candidate_id or ""
+            counts[cid] = counts.get(cid, 0) + 1
+            main = self.ledger.prices.get(c.provider, cand.model_option)
+            if main is None and cand.model_option == "auto":
+                main = self.ledger.prices.max_price(c.provider, NEURALAKE_OPTIONS)
+            if main is None or c.input_tokens is None or c.output_tokens is None or c.cost_nano is None:
+                continue
+            diff = main.cost(c.input_tokens, c.output_tokens) - (from_nano(c.cost_nano) or Decimal("0"))
+            savings[cid] = savings.get(cid, Decimal("0")) + max(Decimal("0"), diff)
+        return counts, savings
 
     # ------------------------------------------------------------------ gate + chamada logica
 

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, TERMINAL, type Report, type RunDetail, type RunEventView } from "@/lib/api";
 import { DECISION_LABEL, ELIGIBILITY_LABEL, STATUS_LABEL, elapsed, money, num, when } from "@/lib/format";
+import { createProject } from "@/lib/projects";
+import Icon from "./Icon";
 import ResultsView from "./ResultsView";
 
 const STATUS_CLASS: Record<string, string> = { completed: "ok", partial: "warn", failed: "bad", cancelled: "info", interrupted: "bad", running: "accent", queued: "info" };
@@ -13,7 +15,7 @@ const STAGE_LABEL: Record<string, string> = { plan: "planejamento", delegate: "e
 
 type CandidateProgress = {
   stages: Record<string, "done" | "active" | "fail" | "pending">;
-  tasks: { task_id: string; kind: string; status: string; error?: string | null }[];
+  tasks: { task_id: string; kind: string; status: string; error?: string | null; model_tier?: string; model_option?: string | null }[];
   proposalVersions: number[];
   eligibility?: string;
   critiquesGiven: number;
@@ -35,7 +37,7 @@ function deriveProgress(events: RunEventView[], candidateIds: string[], critique
       case "task.started":
         if (cid && out[cid]) {
           out[cid].stages.delegate = "active";
-          out[cid].tasks.push({ task_id: String(p.task_id), kind: String(p.kind), status: "running" });
+          out[cid].tasks.push({ task_id: String(p.task_id), kind: String(p.kind), status: "running", model_tier: p.model_tier as string | undefined, model_option: p.model_option as string | null });
         }
         break;
       case "task.completed":
@@ -86,7 +88,9 @@ function deriveProgress(events: RunEventView[], candidateIds: string[], critique
   return out;
 }
 
-export default function RunView({ runId }: { runId: string }) {
+type Props = { runId: string; title?: string; onNewRun?: (runId: string) => void; onStatus?: (detail: RunDetail) => void };
+
+export default function RunView({ runId, title, onNewRun, onStatus }: Props) {
   const router = useRouter();
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [events, setEvents] = useState<RunEventView[]>([]);
@@ -96,11 +100,14 @@ export default function RunView({ runId }: { runId: string }) {
   const [connected, setConnected] = useState(false);
   const lastSeq = useRef(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
 
   const refreshDetail = useCallback(async () => {
     try {
       const d = await api.run(runId);
       setDetail(d);
+      onStatusRef.current?.(d);
       if (TERMINAL.has(d.status) && d.artifacts.report) setReport(d.artifacts.report as Report);
       return d;
     } catch (e) {
@@ -179,14 +186,15 @@ export default function RunView({ runId }: { runId: string }) {
           source_id: s.source_id, title: s.title, media_type: s.media_type, size_bytes: 0, sha256: s.sha256, extraction_status: "ok", pages: s.pages, chars: s.chars, warnings: s.warnings,
         }))
       : [];
-    window.sessionStorage.setItem("agentathon:prefill", JSON.stringify({ challenge: detail.snapshot, sources }));
-    router.push("/");
+    const project = createProject({ ...detail.snapshot, seed: null }, sources);
+    router.push(`/projetos/${project.id}`);
   }
 
   async function retry() {
     try {
       const r = await api.retry(runId);
-      router.push(`/runs/${r.run_id}`);
+      if (onNewRun) onNewRun(r.run_id);
+      else router.push(`/runs/${r.run_id}`);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -199,9 +207,9 @@ export default function RunView({ runId }: { runId: string }) {
 
   return (
     <div>
-      <div className="row spread">
+      <div className="row spread" style={{ marginBottom: 16 }}>
         <div>
-          <h1>{detail.title || detail.run_id}</h1>
+          <h1>{title ?? (detail.title || detail.run_id)}</h1>
           <div className="row">
             <span className={`badge ${STATUS_CLASS[detail.status] ?? "info"}`}>{STATUS_LABEL[detail.status] ?? detail.status}</span>
             {detail.simulated ? <span className="badge seal">SIMULADO</span> : <span className="badge accent">REAL · {detail.mode}</span>}
@@ -216,7 +224,7 @@ export default function RunView({ runId }: { runId: string }) {
               Cancelar
             </button>
           )}
-          <button onClick={duplicate}>Duplicar configuração</button>
+          <button onClick={duplicate}>Copiar para novo projeto</button>
           {isTerminal && <button onClick={retry}>Repetir (novo run)</button>}
           {report && (
             <>
@@ -354,8 +362,14 @@ export default function RunView({ runId }: { runId: string }) {
                   {pr?.eligibility && <span className={`badge ${pr.eligibility === "eligible" ? "ok" : pr.eligibility === "ineligible" ? "bad" : "warn"}`}>{ELIGIBILITY_LABEL[pr.eligibility]}</span>}
                 </span>
               </div>
+              {report && Number(report.cost.secondary_savings?.[cid] ?? 0) > 0 && (
+                <div className="economy-note" style={{ marginTop: 0, marginBottom: 8 }}>
+                  <Icon name="zap" /> {report.cost.secondary_calls[cid]} tarefa(s) no modelo econômico · economia estimada {money(report.cost.secondary_savings[cid], report.cost.currency)}
+                </div>
+              )}
               <div className="meta">
-                {c.provider}/{c.model_option} · preset {c.preset ?? "personalizado"} · até {c.max_specialist_tasks} tarefas · especialistas: {(c.allowed_specialists ?? []).join(", ") || "nenhum"}
+                principal {c.provider}/{c.model_option}
+                {c.secondary_model_option ? ` · econômico ${c.secondary_model_option}` : ""} · preset {c.preset ?? "personalizado"} · até {c.max_specialist_tasks} tarefas · especialistas: {(c.allowed_specialists ?? []).join(", ") || "nenhum"}
               </div>
               <div className="steps">
                 {STAGES.filter((s) => !(detail.snapshot.critique_rounds === 0 && (s === "critique" || s === "revise"))).map((s) => (
@@ -368,7 +382,10 @@ export default function RunView({ runId }: { runId: string }) {
                 <ul className="tight">
                   {pr.tasks.map((t) => (
                     <li key={t.task_id}>
-                      <code>{t.task_id}</code> {t.kind} — <span className={`badge ${t.status === "completed" ? "ok" : t.status === "running" ? "accent" : "warn"}`}>{t.status}</span>
+                      <code>{t.task_id}</code> {t.kind} — <span className={`badge ${t.status === "completed" ? "ok" : t.status === "running" ? "accent" : "warn"}`}>{t.status}</span>{" "}
+                      {t.model_tier === "secondary" && <span className="model-chip second">⚡ econômico · {t.model_option}</span>}
+                      {t.model_tier === "main" && <span className="model-chip main">principal · {t.model_option}</span>}
+                      {t.model_tier === "none" && <span className="model-chip">sem IA (cálculo)</span>}
                       {t.error && <span className="hint"> {t.error}</span>}
                     </li>
                   ))}

@@ -120,6 +120,32 @@ def test_ranking_tie_and_no_eligible_and_unknown_cost() -> None:
     assert unknown.entries[0].efficiency is not None and unknown.entries[0].efficiency.grade is None
 
 
+def test_ranking_panel_weighted_mean_and_missing_judge() -> None:
+    from app.evaluation.ranking import PanelJudge
+
+    panel = [PanelJudge("j1", "Padrao", Decimal(3), RUBRIC), PanelJudge("j2", "Outro", Decimal(1), RUBRIC)]
+
+    def ev(cid: str, jid: str, grade: int) -> Evaluation:
+        return _eval(cid, grade).model_copy(update={"judge_id": jid})
+
+    full = compute_ranking(panel, [
+        CandidateInput("c1", "A", 1, _ver("c1", Eligibility.ELIGIBLE), {"j1": ev("c1", "j1", 10), "j2": ev("c1", "j2", 0)}, Decimal("0"), Decimal("1"), CostQuality.ESTIMATED),
+        CandidateInput("c2", "B", 1, _ver("c2", Eligibility.ELIGIBLE), {"j1": ev("c2", "j1", 5), "j2": ev("c2", "j2", 10)}, Decimal("0"), Decimal("1"), CostQuality.ESTIMATED),
+    ])
+    a = next(e for e in full.entries if e.candidate_id == "c1")
+    # j1: tudo 10 -> 100; j2: notas 0 + eficiencia 10 (peso 10) -> 10. Media (3*100 + 1*10) / 4.
+    assert [s.score_0_100 for s in a.judge_scores] == [Decimal(100), Decimal(10)]
+    assert a.score_0_100 == Decimal(310) / Decimal(4) and a.grades == {}
+    assert full.winner_candidate_id == "c1"
+
+    # Juiz que falhou por inteiro sai do painel para todos, com motivo registrado.
+    partial = compute_ranking(panel, [
+        CandidateInput("c1", "A", 1, _ver("c1", Eligibility.ELIGIBLE), {"j1": ev("c1", "j1", 8)}, Decimal("0"), Decimal("1"), CostQuality.ESTIMATED),
+        CandidateInput("c2", "B", 1, _ver("c2", Eligibility.ELIGIBLE), {"j1": ev("c2", "j1", 6)}, Decimal("0"), Decimal("1"), CostQuality.ESTIMATED),
+    ])
+    assert partial.winner_candidate_id == "c1" and any("painel incompleto" in r for r in partial.reasons)
+
+
 def test_ranking_without_evaluation_is_not_evaluated() -> None:
     res = compute_ranking(RUBRIC, [CandidateInput("c1", "A", 1, _ver("c1", Eligibility.ELIGIBLE), None, Decimal("0"), Decimal("1"), CostQuality.ESTIMATED)])
     assert res.decision_status == DecisionStatus.NOT_EVALUATED and res.winner_candidate_id is None

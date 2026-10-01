@@ -110,6 +110,9 @@ class SpecialistTask(ContractModel):
     query: str | None = Field(default=None, max_length=600)
     calculation: CalculationSpec | None = None
     depends_on: list[str] = Field(default_factory=list, max_length=2)
+    model_tier: Literal["main", "secondary"] | None = Field(
+        default=None, description="Escolha do pensante: 'secondary' (economico) para tarefas simples, 'main' se exigir raciocinio."
+    )
 
 
 class ThinkerPlanOutput(ContractModel):
@@ -172,6 +175,8 @@ class TaskResult(ContractModel):
     shareable: bool = True
     error: str | None = None
     call_ids: list[str] = Field(default_factory=list)
+    model_tier: Literal["main", "secondary", "none"] = "main"
+    model_option: str | None = None
 
 
 # ----------------------------------------------------------------------------- propostas e critica
@@ -289,6 +294,8 @@ class Evaluation(ContractModel):
 
     candidate_id: str
     proposal_version: int
+    judge_id: str = "j1"
+    judge_name: str = "Padrão"
     judge_label: str
     rubric_hash: str
     pack_version: int
@@ -312,7 +319,20 @@ class EfficiencyInfo(ContractModel):
     cost_quality: CostQuality
 
 
+class JudgeScore(ContractModel):
+    model_config = ConfigDict(extra="forbid")
+
+    judge_id: str
+    judge_name: str
+    weight: Money
+    score_0_100: Money | None
+    grades: dict[str, Money] = Field(default_factory=dict)
+
+
 class RankingEntry(ContractModel):
+    """score_0_100 = media ponderada (pelo peso de cada juiz) das notas dos juizes em judge_scores.
+    'grades' traz as notas por criterio apenas quando o painel tem um unico juiz (compatibilidade)."""
+
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
@@ -323,6 +343,7 @@ class RankingEntry(ContractModel):
     co_leader: bool = False
     eligibility: Eligibility
     grades: dict[str, Money] = Field(default_factory=dict)
+    judge_scores: list[JudgeScore] = Field(default_factory=list)
     efficiency: EfficiencyInfo | None = None
     disqualification_reason: str | None = None
     notes: list[str] = Field(default_factory=list)
@@ -342,6 +363,10 @@ class CostBreakdown(ContractModel):
     calls_cap: int
     cap: Money | None
     strict: bool
+    secondary_calls: dict[str, int] = Field(default_factory=dict, description="Chamadas feitas no modelo economico, por candidato.")
+    secondary_savings: dict[str, Money] = Field(
+        default_factory=dict, description="Economia estimada vs. fazer as mesmas chamadas no modelo principal (precos versionados)."
+    )
 
 
 class Report(ContractModel):

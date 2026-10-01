@@ -31,9 +31,10 @@ from app.contracts.artifacts import (
     ThinkerPlanOutput,
     Verification,
 )
+from app.contracts.challenge import CandidateConfig, JudgeConfig
 from app.contracts.common import CostQuality, DecisionStatus, EvidenceType, RunStatus, SpecialistKind
 from app.evaluation.judge import JudgeOutputError, anonymize, judge_criteria, parse_judge_output
-from app.evaluation.ranking import CandidateInput, compute_ranking
+from app.evaluation.ranking import CandidateInput, PanelJudge, compute_ranking
 from app.evaluation.verifiers import verify_proposal
 from app.evidence.calc import CalculationError, run_calculation
 from app.evidence.pack import SourceText, build_pack, freeze_with_derivations
@@ -62,6 +63,21 @@ def _base_meta(ctx: RunContext, cid: str | None) -> dict[str, Any]:
             "max_tasks": cand.max_specialist_tasks,
         })
     return meta
+
+
+def research_model(cand: CandidateConfig, t: SpecialistTask) -> tuple[str, str]:
+    """(tier, opcao) da pesquisa: o economico quando existe e o pensante nao pediu o principal explicitamente."""
+    if not cand.secondary_model_option:
+        return "main", cand.model_option
+    if t.model_tier == "main" or (t.model_tier is None and "research" not in cand.secondary_for):
+        return "main", cand.model_option
+    return "secondary", cand.secondary_model_option
+
+
+def critique_model(cand: CandidateConfig) -> tuple[str, str]:
+    if cand.secondary_model_option and "critique" in cand.secondary_for:
+        return "secondary", cand.secondary_model_option
+    return "main", cand.model_option
 
 
 # --------------------------------------------------------------------------- 1. evidencias
@@ -143,7 +159,8 @@ async def phase_plan(ctx: RunContext) -> None:
             out, call_ids = await ctx.call(
                 role="thinker", stage="plan", candidate_id=cid, provider=str(cand.provider), option=cand.model_option,
                 system=P.THINKER_SYSTEM, user=P.plan_user(ctx.snapshot.model_dump(mode="json"), cand.model_dump(mode="json"), pack, allowed, cand.max_specialist_tasks),
-                schema=ThinkerPlanOutput, max_output_tokens=min(cand.max_output_tokens, 1500), metadata=_base_meta(ctx, cid),
+                schema=ThinkerPlanOutput, max_output_tokens=min(cand.max_output_tokens, 1500),
+                metadata={**_base_meta(ctx, cid), "secondary_model_option": cand.secondary_model_option},
             )
             plan = validate_plan(ctx, cid, out)
         except (CallDenied, CallFailed) as exc:
@@ -164,7 +181,7 @@ async def phase_plan(ctx: RunContext) -> None:
 def _fair_task_limit(ctx: RunContext) -> int:
     """Politica comum: tarefas por candidato limitadas pelos slots livres apos proteger consolidacao, rodada e Judge."""
     n = len(ctx.candidates)
-    protected = n + 1 + (2 * n if ctx.snapshot.critique_rounds else 0)
+    protected = n + len(ctx.judges) + (2 * n if ctx.snapshot.critique_rounds else 0)
     used = ctx._call_counter  # chamadas logicas ja iniciadas nesta execucao
     free = ctx.snapshot.budget.max_total_calls - used - protected
     return max(0, free // max(1, n))
@@ -181,10 +198,13 @@ async def phase_delegate(ctx: RunContext) -> None:
     async def one(cid: str) -> None:
         plan = ctx.plans.get(cid)
         results: list[TaskResult] = []
+        cand = ctx.candidate(cid)
         for t in (plan.tasks[:limit] if plan else []):
-            await ctx.emit("task.started", {"candidate_id": cid, "task_id": t.task_id, "kind": t.kind})
+            tier, option = research_model(cand, t) if t.kind == SpecialistKind.DOCUMENT_RESEARCH else ("none", None)
+            await ctx.emit("task.started", {"candidate_id": cid, "task_id": t.task_id, "kind": t.kind, "model_tier": tier, "model_option": option})
             results.append(await _run_task(ctx, cid, t, known))
-            await ctx.emit("task.completed", {"candidate_id": cid, "task_id": t.task_id, "kind": t.kind, "status": results[-1].status, "error": results[-1].error})
+            await ctx.emit("task.completed", {"candidate_id": cid, "task_id": t.task_id, "kind": t.kind, "status": results[-1].status, "error": results[-1].error,
+                                              "model_tier": tier, "model_option": option})
         ctx.task_results[cid] = results
         for r in results:
             await ctx.save_artifact("task_result", r, candidate_id=f"{cid}:{r.task_id}")
@@ -207,27 +227,29 @@ async def _run_task(ctx: RunContext, cid: str, t: SpecialistTask, known: set[str
         )
         return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.CALCULATION, status="completed",
                           findings=[Finding(claim=f"{d.formula} = {d.result} {d.unit}", evidence_ids=[item.evidence_id], confidence="high")],
-                          derived_evidence=[item])
+                          derived_evidence=[item], model_tier="none")
     assert ctx.pack is not None
+    tier, option = research_model(cand, t)
+    used = {"model_tier": tier, "model_option": option}
     excerpts = retrieve(t.query or "", ctx.pack.items, k=6)
     ex_meta = [{"evidence_id": e.evidence_id, "excerpt": e.excerpt[:900]} for e in excerpts]
     try:
         out, call_ids = await ctx.call(
-            role="specialist", stage="research", candidate_id=cid, provider=str(cand.provider), option=cand.model_option,
+            role="specialist", stage="research", candidate_id=cid, provider=str(cand.provider), option=option,
             system=P.SPECIALIST_SYSTEM, user=P.research_user(t.query or "", ex_meta), schema=ResearchOutput,
             max_output_tokens=800, metadata={**_base_meta(ctx, cid), "query": t.query, "excerpts": ex_meta},
         )
     except CallDenied as exc:
         ctx.operational_changes.append(f"{cand.name}: tarefa {t.task_id} nao admitida ({exc.reason})")
-        return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.DOCUMENT_RESEARCH, status="skipped", error=exc.reason)
+        return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.DOCUMENT_RESEARCH, status="skipped", error=exc.reason, **used)
     except CallFailed as exc:
-        return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.DOCUMENT_RESEARCH, status="failed", error=exc.reason, call_ids=exc.call_ids)
+        return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.DOCUMENT_RESEARCH, status="failed", error=exc.reason, call_ids=exc.call_ids, **used)
     findings = []
     for f in out.findings:
         valid = [e for e in f.evidence_ids if e in known]
         if valid:
             findings.append(Finding(claim=f.claim, evidence_ids=valid, confidence=f.confidence))
-    return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.DOCUMENT_RESEARCH, status="completed", findings=findings, call_ids=call_ids)
+    return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.DOCUMENT_RESEARCH, status="completed", findings=findings, call_ids=call_ids, **used)
 
 
 # --------------------------------------------------------------------------- 4. sincronizacao (barreira unica)
@@ -306,7 +328,7 @@ async def phase_propose(ctx: RunContext) -> None:
 
 async def _round_affordable(ctx: RunContext, cids: list[str]) -> bool:
     n = len(cids)
-    free_calls = ctx.snapshot.budget.max_total_calls - ctx._call_counter - 1
+    free_calls = ctx.snapshot.budget.max_total_calls - ctx._call_counter - len(ctx.judges)
     if free_calls < 2 * n:
         return False
     if ctx.snapshot.budget.total_cap is None or not ctx.ledger.strict:
@@ -321,10 +343,12 @@ async def _round_affordable(ctx: RunContext, cids: list[str]) -> bool:
             continue
         committed = Decimal(b["spent"]) + Decimal(b["reserved"]) + Decimal(b["pending_unknown"]) + Decimal(b["provisioned"])
         try:
+            # Rodada = uma critica (modelo da critica) + uma revisao (modelo principal).
+            crit = ctx.ledger.plan(str(cand.provider), critique_model(cand)[1], 12000, cand.max_output_tokens, []).amount_nano
             est = ctx.ledger.plan(str(cand.provider), cand.model_option, 12000, cand.max_output_tokens, []).amount_nano
         except Exception:  # noqa: BLE001
             return False
-        if committed + 2 * (from_nano(est) or Decimal("0")) > cap:
+        if committed + (from_nano(est) or Decimal("0")) + (from_nano(crit) or Decimal("0")) > cap:
             return False
     return True
 
@@ -349,7 +373,7 @@ async def phase_critique(ctx: RunContext) -> None:
         anon = tp.model_dump(mode="json", exclude={"candidate_id", "call_ids", "invalid_evidence_ids", "revised_from_critique"})
         try:
             out, call_ids = await ctx.call(
-                role="critic", stage="critique", candidate_id=author, provider=str(cand.provider), option=cand.model_option,
+                role="critic", stage="critique", candidate_id=author, provider=str(cand.provider), option=critique_model(cand)[1],
                 system=P.CRITIC_SYSTEM, user=P.critique_user(ctx.snapshot.model_dump(mode="json"), ctx.pack.model_dump(mode="json"), anon),
                 schema=CritiqueOutput, max_output_tokens=min(cand.max_output_tokens, 1500),
                 metadata={**_base_meta(ctx, author), "target_proposal": anon},
@@ -399,41 +423,54 @@ async def phase_judge(ctx: RunContext) -> None:
     if ctx.halt in ("cancelled", "failed"):
         ctx.judge_error = f"Judge nao executado ({ctx.halt_reason})"
         return
-    judge_cfg = ctx.snapshot.judge
-    assert judge_cfg is not None
+    judges = ctx.judges
     proposals = sorted(ctx.proposals.values(), key=lambda p: p.candidate_id)
     ctx.judge_shuffle_seed = (ctx.seed * 7919 + 17) % (2**31)
     anon, anon_ver, label_map = anonymize(proposals, ctx.verifications, ctx.judge_shuffle_seed, names={c.candidate_id or "": c.name for c in ctx.candidates})
-    criteria = judge_criteria(ctx.snapshot.rubric)
     by_cid = {p.candidate_id: p for p in proposals}
+    many = len(judges) > 1
+    errors: list[str] = []
 
-    def validator(out: Any) -> None:
-        parse_judge_output(out.model_dump(mode="json"), ctx.snapshot.rubric, label_map, by_cid, ctx.hashes["rubric"], ctx.pack.version, [])  # type: ignore[union-attr]
+    async def one(j: JudgeConfig) -> None:
+        assert ctx.pack is not None and j.rubric is not None
+        jid, rubric = j.judge_id or "j1", j.rubric
+        criteria = judge_criteria(rubric)
+        rubric_hash = ctx.hashes.get(f"rubric:{jid}", ctx.hashes["rubric"])
+        who = f"Juiz {j.name}" if many else "Judge"
 
-    try:
-        out, call_ids = await ctx.call(
-            role="judge", stage="judge", candidate_id=None, provider=str(judge_cfg.provider), option=judge_cfg.model_option,
-            system=P.JUDGE_SYSTEM, user=P.judge_user(ctx.snapshot.model_dump(mode="json"), ctx.pack.model_dump(mode="json"), criteria, anon, anon_ver),
-            schema=JudgeOutput, max_output_tokens=judge_cfg.max_output_tokens, protected=True,
-            metadata={**_base_meta(ctx, None), "criteria": [c["criterion_id"] for c in criteria], "proposals": anon, "verifications": anon_ver, "labels": list(label_map)},
-            validator=validator,
-        )
-    except (CallDenied, CallFailed) as exc:
-        ctx.judge_error = f"Judge falhou: {getattr(exc, 'reason', exc)}"
-        ctx.partial_reasons.append(ctx.judge_error)
-        await ctx.emit("evaluation.failed", {"reason": ctx.judge_error})
+        def validator(out: Any) -> None:
+            parse_judge_output(out.model_dump(mode="json"), rubric, label_map, by_cid, rubric_hash, ctx.pack.version, [])  # type: ignore[union-attr]
+
+        try:
+            out, call_ids = await ctx.call(
+                role="judge", stage="judge", candidate_id=None, provider=str(j.provider), option=j.model_option or "",
+                system=P.JUDGE_SYSTEM,
+                user=P.judge_user(ctx.snapshot.model_dump(mode="json"), ctx.pack.model_dump(mode="json"), criteria, anon, anon_ver, persona={"name": j.name, "instructions": j.instructions}),
+                schema=JudgeOutput, max_output_tokens=j.max_output_tokens, protected=True,
+                metadata={**_base_meta(ctx, None), "judge_id": jid, "judge_name": j.name, "persona": j.persona, "criteria": [c["criterion_id"] for c in criteria],
+                          "proposals": anon, "verifications": anon_ver, "labels": list(label_map)},
+                validator=validator,
+            )
+            evaluations = parse_judge_output(out.model_dump(mode="json"), rubric, label_map, by_cid, rubric_hash, ctx.pack.version, call_ids, judge_id=jid, judge_name=j.name)
+        except (CallDenied, CallFailed) as exc:
+            errors.append(f"{who} falhou: {getattr(exc, 'reason', exc)}")
+            await ctx.emit("evaluation.failed", {"reason": errors[-1], "judge_id": jid})
+            return
+        except (JudgeOutputError, ValueError) as exc:
+            errors.append(f"saida do {who} invalida: {exc}")
+            await ctx.emit("evaluation.failed", {"reason": errors[-1], "judge_id": jid})
+            return
+        ctx.evaluations[jid] = {ev.candidate_id: ev for ev in evaluations}
+        for ev in evaluations:
+            await ctx.save_artifact("evaluation", ev, candidate_id=f"{ev.candidate_id}:{jid}" if many else ev.candidate_id, version=ev.proposal_version)
+
+    await asyncio.gather(*(one(j) for j in judges))
+    ctx.partial_reasons.extend(errors)
+    if not ctx.evaluations:
+        ctx.judge_error = "; ".join(errors) or "sem avaliacao"
         return
-    try:
-        evaluations = parse_judge_output(out.model_dump(mode="json"), ctx.snapshot.rubric, label_map, by_cid, ctx.hashes["rubric"], ctx.pack.version, call_ids)
-    except (JudgeOutputError, ValueError) as exc:
-        ctx.judge_error = f"saida do Judge invalida: {exc}"
-        ctx.partial_reasons.append(ctx.judge_error)
-        await ctx.emit("evaluation.failed", {"reason": ctx.judge_error})
-        return
-    for ev in evaluations:
-        ctx.evaluations[ev.candidate_id] = ev
-        await ctx.save_artifact("evaluation", ev, candidate_id=ev.candidate_id, version=ev.proposal_version)
-    await ctx.emit("evaluation.ready", {"candidates": sorted(ctx.evaluations), "shuffle_seed": ctx.judge_shuffle_seed, "labels": label_map})
+    evaluated = sorted({cid for evs in ctx.evaluations.values() for cid in evs})
+    await ctx.emit("evaluation.ready", {"candidates": evaluated, "judges": [j.judge_id for j in judges if j.judge_id in ctx.evaluations], "shuffle_seed": ctx.judge_shuffle_seed, "labels": label_map})
 
 
 # --------------------------------------------------------------------------- 10. ranking + relatorio
@@ -462,8 +499,10 @@ async def phase_rank_report(ctx: RunContext) -> Report:
         if b and b.pending_unknown_nano > 0:
             quality = CostQuality.UNKNOWN
         p = ctx.proposals.get(cid)
-        inputs.append(CandidateInput(cid, c.name, p.version if p else None, ctx.verifications.get(cid), ctx.evaluations.get(cid), spent, quota, quality))
-    ranking = compute_ranking(ctx.snapshot.rubric, inputs)
+        evals = {jid: evs[cid] for jid, evs in ctx.evaluations.items() if cid in evs}
+        inputs.append(CandidateInput(cid, c.name, p.version if p else None, ctx.verifications.get(cid), evals or None, spent, quota, quality))
+    panel = [PanelJudge(j.judge_id or "j1", j.name, Decimal(j.weight), j.rubric or ctx.snapshot.rubric) for j in ctx.judges]
+    ranking = compute_ranking(panel, inputs)
     if not ctx.evaluations:
         ranking.decision_status = DecisionStatus.NOT_EVALUATED
         ranking.winner_candidate_id = None
@@ -472,6 +511,7 @@ async def phase_rank_report(ctx: RunContext) -> Report:
     per_candidate = {c.candidate_id or "": (from_nano(buckets[candidate_bucket(c.candidate_id or "")].spent_nano) or Decimal("0")) if candidate_bucket(c.candidate_id or "") in buckets else Decimal("0") for c in ctx.candidates}
     common_spent = from_nano(common.spent_nano) if common else Decimal("0")
     total = (common_spent or Decimal("0")) + sum(per_candidate.values(), Decimal("0"))
+    secondary_calls, secondary_savings = await ctx.secondary_usage()
     status = _intended_status(ctx)
     limitations = list(ctx.limitations)
     if ctx.simulated:
@@ -489,13 +529,15 @@ async def phase_rank_report(ctx: RunContext) -> Report:
         generated_at=datetime.now(UTC), winner_candidate_id=ranking.winner_candidate_id, co_leaders=ranking.co_leaders,
         decision_reasons=ranking.reasons, ranking=ranking.entries, proposals=sorted(ctx.proposals.values(), key=lambda p: p.candidate_id),
         critiques=sorted(ctx.critiques, key=lambda c: c.author_candidate_id), verifications=sorted(ctx.verifications.values(), key=lambda v: v.candidate_id),
-        evaluations=sorted(ctx.evaluations.values(), key=lambda e: e.candidate_id),
+        evaluations=[ctx.evaluations[jid][cid] for cid in sorted({c for evs in ctx.evaluations.values() for c in evs})
+                     for jid in (j.judge_id for j in ctx.judges) if jid in ctx.evaluations and cid in ctx.evaluations[jid]],
         evidence_pack_version=ctx.pack.version if ctx.pack else None, evidence_gaps=list(ctx.pack.gaps) if ctx.pack else [],
         limitations=limitations, operational_changes=list(ctx.operational_changes),
         cost=CostBreakdown(
             currency=ctx.snapshot.budget.currency, common=common_spent or Decimal("0"), judge=costs["judge"], per_candidate=per_candidate,
             total=total, pending_unknown_reserved=costs["pending_unknown"], quality=costs["quality"], calls_used=costs["calls_used"],
             calls_cap=ctx.snapshot.budget.max_total_calls, cap=ctx.snapshot.budget.total_cap, strict=ctx.snapshot.budget.strict,
+            secondary_calls=secondary_calls, secondary_savings=secondary_savings,
         ),
         next_steps=next_steps, judge_shuffle_seed=ctx.judge_shuffle_seed,
         diversity_observed={k: sorted(v) for k, v in ctx.reported_models.items()},

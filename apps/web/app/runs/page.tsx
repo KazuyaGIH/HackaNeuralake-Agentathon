@@ -19,16 +19,16 @@ export default function RunsPage() {
   }, []);
 
   return (
-    <div>
-      <h1>Histórico de execuções</h1>
-      <p className="lead">Reabra uma execução para consultar a configuração congelada, os artefatos e exportar o relatório.</p>
+    <div className="container">
+      <h1>Histórico</h1>
+      <p className="lead">Todas as arenas executadas, de qualquer projeto.</p>
       {error && <div className="error">{error}</div>}
       <div className="panel">
         {runs === null ? (
           <p className="muted">Carregando…</p>
         ) : runs.length === 0 ? (
           <p className="muted">
-            Nenhuma execução ainda. <Link href="/">Configure um desafio</Link>.
+            Nenhuma arena ainda. <Link href="/">Abra um projeto</Link>.
           </p>
         ) : (
           <table>

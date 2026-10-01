@@ -73,9 +73,29 @@ def resolve_candidates(cfg: ChallengeConfig, catalog: Catalog) -> list[Candidate
             CandidateConfig(
                 candidate_id=f"c{i + 1}", name=f"Equipe {preset.label}", preset=preset.preset, instructions=preset.instructions,
                 provider=provider, model_option=preset.model_option_by_provider[str(provider)],
+                secondary_model_option=preset.secondary_by_provider.get(str(provider)),
                 allowed_specialists=list(preset.allowed_specialists), max_specialist_tasks=preset.max_specialist_tasks, color=preset.color,
             )
         )
+    return out
+
+
+def resolve_judges(cfg: ChallengeConfig) -> list[JudgeConfig]:
+    """Painel de juizes resolvido: IDs, rubrica (a do desafio quando ausente) e provedor/opcao padrao do modo."""
+    base = cfg.judges or [cfg.judge or JudgeConfig()]
+    mode_provider = Provider.MOCK if cfg.mode == ExecutionMode.MOCK else Provider.NEURALAKE
+    out: list[JudgeConfig] = []
+    for i, j in enumerate(base, start=1):
+        provider = j.provider or mode_provider
+        out.append(j.model_copy(update={
+            "judge_id": j.judge_id or f"j{i}",
+            "rubric": j.rubric or cfg.rubric,
+            "provider": provider,
+            "model_option": j.model_option or ("mock-default" if provider == Provider.MOCK else "reasoning"),
+        }))
+    ids = [j.judge_id for j in out]
+    if len(ids) != len(set(ids)):
+        raise IntakeError("judge_id duplicado apos resolucao")
     return out
 
 
@@ -85,17 +105,17 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
     ids = [c.candidate_id for c in candidates]
     if len(ids) != len(set(ids)):
         raise IntakeError("candidate_id duplicado apos resolucao")
-    judge = cfg.judge or JudgeConfig(
-        provider=Provider.MOCK if cfg.mode == ExecutionMode.MOCK else Provider.NEURALAKE,
-        model_option="mock-default" if cfg.mode == ExecutionMode.MOCK else "reasoning",
-    )
+    judges = resolve_judges(cfg)
+    judge_roles = [(f"juiz {j.name}", j.provider, j.model_option) for j in judges]
     if cfg.budget.run_deadline_s > settings.server_max_deadline_s:
         raise IntakeError(f"run_deadline_s excede o maximo do servidor ({settings.server_max_deadline_s}s)")
     if cfg.mode == ExecutionMode.MOCK and cfg.mock_scenario not in MOCK_SCENARIOS:
         raise IntakeError(f"mock_scenario desconhecido: {cfg.mock_scenario}", hint=f"cenarios: {', '.join(MOCK_SCENARIOS)}")
 
     # Provedores/opcoes: sem fallback silencioso entre provedores ou para mock.
-    for role, provider, option in [(c.name, c.provider, c.model_option) for c in candidates] + [("judge", judge.provider, judge.model_option)]:
+    model_roles = [(c.name, c.provider, c.model_option) for c in candidates]
+    model_roles += [(f"{c.name} (modelo economico)", c.provider, c.secondary_model_option) for c in candidates if c.secondary_model_option]
+    for role, provider, option in model_roles + judge_roles:
         if cfg.mode == ExecutionMode.MOCK and provider != Provider.MOCK:
             raise IntakeError(f"{role}: modo mock aceita apenas provider 'mock' (recebido '{provider}')", code="provider_mismatch")
         if cfg.mode == ExecutionMode.REAL and provider == Provider.MOCK:
@@ -133,16 +153,16 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
             )
 
     # Orcamento: eficiencia exige cota positiva; modo estrito exige precos conhecidos.
-    has_eff = any(c.computed_by == "server_efficiency" for c in cfg.rubric.criteria)
+    has_eff = any(c.computed_by == "server_efficiency" for j in judges for c in (j.rubric.criteria if j.rubric else []))
     if has_eff and cfg.budget.total_cap is None:
         raise IntakeError(
             "o criterio de eficiencia exige budget.total_cap para definir cotas", code="budget_required",
-            hint=f"defina budget.total_cap ou remova o criterio '{EFFICIENCY_CRITERION_ID}' da rubrica antes de iniciar",
+            hint=f"defina budget.total_cap ou remova o criterio '{EFFICIENCY_CRITERION_ID}' das rubricas dos juizes antes de iniciar",
         )
     ledger = Ledger(prices, strict=cfg.budget.strict)
     if cfg.budget.strict:
-        for role, provider, option in [(c.name, c.provider, c.model_option) for c in candidates] + [("judge", judge.provider, judge.model_option)]:
-            price = prices.get(str(provider), option) or (prices.max_price(str(provider), NEURALAKE_OPTIONS) if option == "auto" else None)
+        for role, provider, option in model_roles + judge_roles:
+            price =prices.get(str(provider), option) or (prices.max_price(str(provider), NEURALAKE_OPTIONS) if option == "auto" else None)
             if price is None:
                 raise IntakeError(
                     f"{role}: preco desconhecido para {provider}/{option}; modo de orcamento estrito bloqueado", code="price_unknown",
@@ -151,8 +171,9 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
     weights = {c.candidate_id or "": Decimal(c.quota_weight) for c in candidates}
     caps = split_caps(cfg.budget.total_cap, Decimal(cfg.budget.common_share_pct), weights)
     specs: list[tuple[str, int | None, int, int]] = []
-    judge_est = ledger.plan(str(judge.provider), judge.model_option, 16000, judge.max_output_tokens, NEURALAKE_OPTIONS).amount_nano
-    specs.append((COMMON_BUCKET, caps[COMMON_BUCKET], judge_est, 1))
+    # Cada juiz do painel recebe provisao protegida (custo estimado + uma chamada) na cota comum.
+    judge_est = sum(ledger.plan(str(j.provider), j.model_option or "", 16000, j.max_output_tokens, NEURALAKE_OPTIONS).amount_nano for j in judges)
+    specs.append((COMMON_BUCKET, caps[COMMON_BUCKET], judge_est, len(judges)))
     for c in candidates:
         est = ledger.plan(str(c.provider), c.model_option, 12000, c.max_output_tokens, NEURALAKE_OPTIONS).amount_nano
         specs.append((candidate_bucket(c.candidate_id or ""), caps[candidate_bucket(c.candidate_id or "")], est, 1))
@@ -163,17 +184,17 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
                     f"orcamento insuficiente para uma execucao minima: bucket '{key}' precisa de ~{from_nano(prov)} {cfg.budget.currency} para a etapa protegida, cota = {from_nano(cap)}",
                     code="budget_insufficient", hint="aumente budget.total_cap, reduza max_output_tokens ou ajuste common_share_pct",
                 )
-    if len(candidates) + 1 > cfg.budget.max_total_calls:
-        raise IntakeError("max_total_calls insuficiente para consolidacao de todos os candidatos e Judge", code="budget_insufficient")
+    if len(candidates) + len(judges) > cfg.budget.max_total_calls:
+        raise IntakeError("max_total_calls insuficiente para consolidacao de todos os candidatos e o painel de juizes", code="budget_insufficient")
     if cfg.mode == ExecutionMode.REAL and not cfg.budget.strict:
         warnings.append("orcamento indicativo: o teto monetario nao e estrito; limites de tokens, chamadas e tempo continuam ativos")
 
     seed = cfg.seed if cfg.seed is not None else secrets.randbelow(2**31 - 1)
-    snapshot = cfg.model_copy(update={"candidates": candidates, "judge": judge, "seed": seed, "config_mode": cfg.config_mode})
+    snapshot = cfg.model_copy(update={"candidates": candidates, "judge": judges[0], "judges": judges, "seed": seed, "config_mode": cfg.config_mode})
     snap_json = snapshot.model_dump(mode="json")
     hashes = {
         "config": _sha(snap_json),
-        "rubric": _sha(snap_json["rubric"]),
+        "rubric": _sha([j["rubric"] for j in snap_json["judges"]]),
         "constraints": _sha(snap_json["constraints"]),
         "prompts": prompts_hash(),
         "prompts_version": PROMPTS_VERSION,
@@ -181,6 +202,7 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
         "catalog_version": CATALOG_VERSION,
         "app_version": APP_VERSION,
         **{f"instructions:{c.candidate_id}": _sha(c.instructions) for c in candidates},
+        **{f"rubric:{j.judge_id}": _sha(snap_json["judges"][i]["rubric"]) for i, j in enumerate(judges)},
     }
     return Prepared(snapshot=snapshot, hashes=hashes, seed=seed, warnings=warnings, bucket_specs=specs)
 

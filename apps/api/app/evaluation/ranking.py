@@ -1,9 +1,10 @@
-"""Motor de ranking deterministico: eficiencia calculada no servidor, score ponderado, elegibilidade e decisao."""
+"""Motor de ranking deterministico: eficiencia calculada no servidor, score ponderado por juiz, media ponderada do
+painel de juizes, elegibilidade e decisao."""
 
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.contracts.artifacts import EfficiencyInfo, Evaluation, RankingEntry, Verification
+from app.contracts.artifacts import EfficiencyInfo, Evaluation, JudgeScore, RankingEntry, Verification
 from app.contracts.challenge import Rubric
 from app.contracts.common import CostQuality, DecisionStatus, Eligibility
 
@@ -41,12 +42,21 @@ def score(rubric: Rubric, grades: dict[str, Decimal]) -> Decimal:
 
 
 @dataclass
+class PanelJudge:
+    judge_id: str
+    name: str
+    weight: Decimal
+    rubric: Rubric
+
+
+@dataclass
 class CandidateInput:
     candidate_id: str
     candidate_name: str
     proposal_version: int | None
     verification: Verification | None
-    evaluation: Evaluation | None
+    # Avaliacoes por juiz (judge_id -> Evaluation). Uma Evaluation solta equivale a um painel de um unico juiz.
+    evaluation: Evaluation | dict[str, Evaluation] | None
     cost: Decimal | None
     quota: Decimal | None
     cost_quality: CostQuality
@@ -61,49 +71,81 @@ class RankingResult:
     reasons: list[str]
 
 
-def compute_ranking(rubric: Rubric, inputs: list[CandidateInput]) -> RankingResult:
+def _evaluations(ci: CandidateInput, panel: list[PanelJudge]) -> dict[str, Evaluation]:
+    if ci.evaluation is None:
+        return {}
+    if isinstance(ci.evaluation, Evaluation):
+        return {panel[0].judge_id: ci.evaluation}
+    return ci.evaluation
+
+
+def compute_ranking(panel: Rubric | list[PanelJudge], inputs: list[CandidateInput]) -> RankingResult:
+    if isinstance(panel, Rubric):
+        panel = [PanelJudge("j1", "Padrão", Decimal("1"), panel)]
     entries: list[RankingEntry] = []
     reasons: list[str] = []
-    server_criteria = [c for c in rubric.criteria if c.computed_by == "server_efficiency"]
-    eff_criterion = server_criteria[0] if server_criteria else None
+    needs_efficiency = any(c.computed_by == "server_efficiency" for j in panel for c in j.rubric.criteria)
     any_unknown_cost = False
+
+    # Juizes ativos: os que entregaram avaliacao completa de pelo menos uma proposta. Um juiz que falhou por inteiro
+    # sai do painel para todos (registrado nas razoes); a falta de nota de um juiz ativo deixa a candidatura sem score.
+    complete = [{jid for jid, ev in _evaluations(ci, panel).items() if ev.status == "complete"} for ci in inputs]
+    active_ids = {j.judge_id for j in panel if any(j.judge_id in c for c in complete)}
+    active = [j for j in panel if j.judge_id in active_ids]
+    missing_judges = [j for j in panel if j.judge_id not in active_ids]
+    if active and missing_judges:
+        reasons.append("painel incompleto: sem avaliacao de " + ", ".join(j.name for j in missing_judges) + "; media calculada com os demais juizes")
 
     for ci in inputs:
         notes: list[str] = []
         elig = ci.verification.eligibility if ci.verification else Eligibility.PENDING
         if ci.verification is None:
             notes.append("sem verificacao objetiva (proposta ausente)")
-        grades: dict[str, Decimal] = {}
-        score_val: Decimal | None = None
+        evals = _evaluations(ci, panel)
         eff_info: EfficiencyInfo | None = None
-        if ci.evaluation is not None and ci.evaluation.status == "complete":
-            grades = {g.criterion_id: Decimal(g.grade) for g in ci.evaluation.grades}
-            if eff_criterion is not None:
-                if ci.cost is None or ci.quota is None or ci.cost_quality == CostQuality.UNKNOWN:
-                    any_unknown_cost = True
-                    notes.append("consumo desconhecido: nota de eficiencia nao pode ser calculada")
-                    eff_info = EfficiencyInfo(cost=ci.cost, quota=ci.quota, grade=None, cost_quality=ci.cost_quality)
-                else:
-                    g = efficiency_grade(ci.cost, ci.quota)
-                    grades[eff_criterion.criterion_id] = g
-                    eff_info = EfficiencyInfo(cost=ci.cost, quota=ci.quota, grade=g, cost_quality=ci.cost_quality)
-            try:
-                score_val = score(rubric, grades)
-            except RankingError as exc:
-                notes.append(f"score nao calculado: {exc}")
-                score_val = None
-        elif ci.evaluation is not None:
-            notes.append("avaliacao incompleta do Judge")
-        else:
+        eff_grade: Decimal | None = None
+        if needs_efficiency and any(ev.status == "complete" for ev in evals.values()):
+            if ci.cost is None or ci.quota is None or ci.cost_quality == CostQuality.UNKNOWN:
+                any_unknown_cost = True
+                notes.append("consumo desconhecido: nota de eficiencia nao pode ser calculada")
+                eff_info = EfficiencyInfo(cost=ci.cost, quota=ci.quota, grade=None, cost_quality=ci.cost_quality)
+            else:
+                eff_grade = efficiency_grade(ci.cost, ci.quota)
+                eff_info = EfficiencyInfo(cost=ci.cost, quota=ci.quota, grade=eff_grade, cost_quality=ci.cost_quality)
+
+        judge_scores: list[JudgeScore] = []
+        for j in panel:
+            ev = evals.get(j.judge_id)
+            grades: dict[str, Decimal] = {}
+            score_j: Decimal | None = None
+            if ev is not None and ev.status == "complete":
+                grades = {g.criterion_id: Decimal(g.grade) for g in ev.grades}
+                eff = next((c for c in j.rubric.criteria if c.computed_by == "server_efficiency"), None)
+                if eff is not None and eff_grade is not None:
+                    grades[eff.criterion_id] = eff_grade
+                try:
+                    score_j = score(j.rubric, grades)
+                except RankingError as exc:
+                    notes.append(f"{j.name}: score nao calculado: {exc}" if len(panel) > 1 else f"score nao calculado: {exc}")
+            elif ev is not None:
+                notes.append(f"avaliacao incompleta de {j.name}" if len(panel) > 1 else "avaliacao incompleta do Judge")
+            judge_scores.append(JudgeScore(judge_id=j.judge_id, judge_name=j.name, weight=j.weight, score_0_100=score_j, grades=grades))
+
+        score_val: Decimal | None = None
+        active_scores = [(j, s) for j, s in zip(panel, judge_scores) if j.judge_id in active_ids]
+        if not evals:
             notes.append("nao avaliado")
+        elif active_scores and all(s.score_0_100 is not None for _, s in active_scores):
+            total_w = sum((j.weight for j, _ in active_scores), ZERO)
+            score_val = sum((j.weight * (s.score_0_100 or ZERO) for j, s in active_scores), ZERO) / total_w
         disq = None
         if elig == Eligibility.INELIGIBLE and ci.verification:
             disq = "; ".join(ci.verification.reasons) or "restricao obrigatoria violada"
         entries.append(
             RankingEntry(
                 candidate_id=ci.candidate_id, candidate_name=ci.candidate_name, proposal_version=ci.proposal_version,
-                score_0_100=score_val, rank=None, eligibility=elig, grades=grades, efficiency=eff_info,
-                disqualification_reason=disq, notes=notes,
+                score_0_100=score_val, rank=None, eligibility=elig, grades=judge_scores[0].grades if len(panel) == 1 else {},
+                judge_scores=judge_scores, efficiency=eff_info, disqualification_reason=disq, notes=notes,
             )
         )
 
@@ -119,7 +161,7 @@ def compute_ranking(rubric: Rubric, inputs: list[CandidateInput]) -> RankingResu
             rank = i + 1
             prev = key
         e.rank = rank
-    threshold = rubric.min_score_threshold
+    threshold = panel[0].rubric.min_score_threshold if len(panel) == 1 else None
 
     eligible = [e for e in ranked if e.eligibility == Eligibility.ELIGIBLE]
     if threshold is not None:
@@ -130,7 +172,7 @@ def compute_ranking(rubric: Rubric, inputs: list[CandidateInput]) -> RankingResu
 
     if not inputs:
         return RankingResult(entries, DecisionStatus.NOT_EVALUATED, None, [], ["nenhum candidato"])
-    if any_unknown_cost and eff_criterion is not None:
+    if any_unknown_cost:
         reasons.append("consumo desconhecido impede nota completa e vencedor oficial")
         return RankingResult(entries, DecisionStatus.INCONCLUSIVE, None, [], reasons)
     if not scored:
@@ -152,5 +194,7 @@ def compute_ranking(rubric: Rubric, inputs: list[CandidateInput]) -> RankingResu
             e.co_leader = True
         reasons.append("empate na pontuacao: co-lideranca, ordem visual por ID")
         return RankingResult(entries, DecisionStatus.TIE, None, [e.candidate_id for e in leaders], reasons)
+    if len(active) > 1:
+        reasons.append(f"nota final = media ponderada de {len(active)} juizes")
     reasons.append("primeiro colocado relativo entre elegiveis; nao significa aprovacao absoluta")
     return RankingResult(entries, DecisionStatus.RANKED, leaders[0].candidate_id, [], reasons)

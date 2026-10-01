@@ -189,6 +189,16 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
 - **Judge**: uma chamada comparativa com todas as propostas anonimizadas (`P1..Pn`, ordem embaralhada com seed
   registrada, nomes de equipe removidos por scrub, sem provedor/modelo/instruções). Critério ausente ou label
   desconhecido é tratado como resposta inválida e consome a única reparação permitida.
+- **Painel de juízes** (`ChallengeConfig.judges`, até 6): cada juiz tem persona (Padrão, Especialista Técnico,
+  Especialista em Negócios, Designer/UX ou personalizada), instruções de perspectiva, rubrica própria (pesos somam 100) e
+  peso no resultado. Cada juiz faz uma chamada com provisão protegida; `score_0_100` = média ponderada dos scores dos
+  juízes (`RankingEntry.judge_scores`). Juiz que falha por inteiro sai do painel para todos, com motivo registrado.
+  Sem `judges`, vale o juiz único legado (`judge` + `rubric`). Personas e rubricas em `GET /catalog` (`judge_personas`).
+- **Modelo principal + modelo econômico por equipe** (`CandidateConfig.model_option` / `secondary_model_option`,
+  mesmo provedor): o principal planeja, propõe e revisa; o econômico faz as tarefas de `secondary_for` (pesquisa nos
+  documentos por padrão; opcionalmente críticas). O pensante pode marcar `model_tier: "main"` numa pesquisa difícil.
+  Presets automáticos já trazem um econômico (exceto "Custo", cujo principal já é o mais barato). O relatório traz
+  `cost.secondary_calls` e `cost.secondary_savings` (economia estimada vs. as mesmas chamadas no modelo principal).
 - **Especialista de cálculo** não usa inferência: o pensante pede a função tipada e o coordenador executa em código
   (`sum, subtract, multiply, divide, percent_of, percent_change, annual_from_monthly, monthly_from_annual, tco, min, max,
   average, per_unit`), exigindo entradas com `evidence_ids` existentes. A pesquisa documental usa recuperação lexical

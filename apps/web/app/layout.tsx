@@ -12,20 +12,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-BR">
       <body>
         <header className="topbar">
-          <div>
-            <Link className="brand" href="/">
-              Agent<span>athon</span>
-            </Link>
-          </div>
+          <Link className="brand" href="/">
+            <span className="brand-mark">A</span>
+            Agentathon
+          </Link>
           <nav>
-            <Link href="/">Novo desafio</Link>
+            <Link href="/">Projetos</Link>
             <Link href="/runs">Histórico</Link>
           </nav>
         </header>
         <main>{children}</main>
-        <footer>
-          Agentathon MVP · apoio à decisão entre propostas de agentes; não executa a proposta vencedora. Conteúdo simulado leva o selo SIMULADO.
-        </footer>
       </body>
     </html>
   );

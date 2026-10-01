@@ -214,6 +214,81 @@ async def test_no_efficiency_without_cap_requires_explicit_choice(client: httpx.
     assert all("efficiency" not in e["grades"] for e in report["ranking"]) and report["cost"]["cap"] is None
 
 
+async def test_judge_panel_weighted_average_of_personas(client: httpx.AsyncClient) -> None:
+    catalog = (await client.get("/api/v1/catalog")).json()
+    personas = {p["persona"]: p for p in catalog["judge_personas"]}
+    assert set(personas) == {"default", "technical", "business", "ux"}
+    cfg = await demo_config(client)
+    weights = {"default": "2", "technical": "1", "business": "1", "ux": "1"}
+    cfg["judges"] = [
+        {"name": p["name"], "persona": key, "instructions": p["instructions"], "weight": weights[key], "rubric": p["rubric"]}
+        for key, p in personas.items()
+    ]
+    run_id = await create_run(client, cfg)
+    detail = await wait_terminal(client, run_id)
+    report = (await client.get(f"/api/v1/runs/{run_id}/report")).json()
+    assert detail["status"] == "completed", detail["error"]
+    assert report["decision_status"] == "ranked" and report["winner_candidate_id"]
+    # Uma chamada por juiz, cada uma com a propria rubrica; avaliacoes rotuladas por juiz.
+    judge_calls = [c for c in detail["artifacts"]["calls"] if c["role"] == "judge"]
+    assert len(judge_calls) == 4
+    assert len(report["evaluations"]) == 4 * 2 and {e["judge_id"] for e in report["evaluations"]} == {"j1", "j2", "j3", "j4"}
+    ux = next(e for e in report["evaluations"] if e["judge_name"] == personas["ux"]["name"])
+    assert {g["criterion_id"] for g in ux["grades"]} == {"user_experience", "usability", "interface", "clarity"}
+    # Nota final = media ponderada das notas de cada juiz.
+    for e in report["ranking"]:
+        scores = {s["judge_id"]: float(s["score_0_100"]) for s in e["judge_scores"]}
+        w = {"j1": 2, "j2": 1, "j3": 1, "j4": 1}
+        expected = sum(w[j] * s for j, s in scores.items()) / sum(w.values())
+        assert abs(float(e["score_0_100"]) - expected) < 1e-6
+    md = (await client.get(f"/api/v1/runs/{run_id}/report", params={"format": "md"})).text
+    assert "Avaliacao dos juizes" in md and personas["technical"]["name"] in md
+
+
+async def test_secondary_model_handles_internal_tasks_and_reports_savings(client: httpx.AsyncClient) -> None:
+    # Automatico: a equipe Equilibrio (principal mock-default) delega a pesquisa ao economico mock-cheap.
+    run_id, detail, report = await run_demo(client)
+    c1 = next(c for c in detail["snapshot"]["candidates"] if c["candidate_id"] == "c1")
+    assert c1["model_option"] == "mock-default" and c1["secondary_model_option"] == "mock-cheap"
+    calls = detail["artifacts"]["calls"]
+    research = [c for c in calls if c["candidate_id"] == "c1" and c["stage"] == "research"]
+    assert research and all(c["requested_option"] == "mock-cheap" for c in research)
+    assert all(c["requested_option"] == "mock-default" for c in calls if c["candidate_id"] == "c1" and c["stage"] in ("plan", "propose", "revise", "critique"))
+    assert report["cost"]["secondary_calls"]["c1"] == len(research) and float(report["cost"]["secondary_savings"]["c1"]) > 0
+
+    # Personalizado: economico tambem nas criticas; equipe sem economico usa so o principal.
+    cfg = await demo_config(client)
+    cfg["config_mode"] = "manual"
+    cfg["candidates"] = [
+        {"name": "Duas camadas", "model_option": "mock-reasoning", "secondary_model_option": "mock-cheap", "secondary_for": ["research", "critique"]},
+        {"name": "So principal", "model_option": "mock-default"},
+    ]
+    run_id = await create_run(client, cfg)
+    detail = await wait_terminal(client, run_id)
+    report = (await client.get(f"/api/v1/runs/{run_id}/report")).json()
+    calls = detail["artifacts"]["calls"]
+    assert {c["requested_option"] for c in calls if c["candidate_id"] == "c1" and c["stage"] == "critique"} == {"mock-cheap"}
+    assert {c["requested_option"] for c in calls if c["candidate_id"] == "c2"} == {"mock-default"}
+    assert "c2" not in report["cost"]["secondary_calls"]
+    results = detail["artifacts"]["task_result"]
+    assert any(r["candidate_id"] == "c1" and r["model_tier"] == "secondary" for r in results)
+
+
+async def test_secondary_model_must_exist(client: httpx.AsyncClient) -> None:
+    cfg = await demo_config(client)
+    cfg["config_mode"] = "manual"
+    cfg["candidates"] = [{"name": "A", "secondary_model_option": "nao-existe"}, {"name": "B"}]
+    r = await client.post("/api/v1/runs", json=cfg)
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "unknown_option"
+
+
+async def test_judge_panel_names_must_be_unique(client: httpx.AsyncClient) -> None:
+    cfg = await demo_config(client)
+    cfg["judges"] = [{"name": "Igual"}, {"name": "igual"}]
+    r = await client.post("/api/v1/runs", json=cfg)
+    assert r.status_code == 422
+
+
 async def test_run_deadline_exceeded_ends_partial(tmp_path) -> None:  # noqa: ANN001
     from app.providers.mock import MockAdapter
 

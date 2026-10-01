@@ -951,7 +951,34 @@
             "type": "string",
             "maxLength": 64,
             "title": "Model Option",
+            "description": "Modelo principal (planejar, propor, revisar).",
             "default": "mock-default"
+          },
+          "secondary_model_option": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondary Model Option",
+            "description": "Modelo economico opcional (mesmo provedor) para tarefas internas simples."
+          },
+          "secondary_for": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "research",
+                "critique"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Secondary For",
+            "description": "Onde o modelo economico e usado por padrao."
           },
           "allowed_specialists": {
             "items": {
@@ -1062,7 +1089,34 @@
             "type": "string",
             "maxLength": 64,
             "title": "Model Option",
+            "description": "Modelo principal (planejar, propor, revisar).",
             "default": "mock-default"
+          },
+          "secondary_model_option": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondary Model Option",
+            "description": "Modelo economico opcional (mesmo provedor) para tarefas internas simples."
+          },
+          "secondary_for": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "research",
+                "critique"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Secondary For",
+            "description": "Onde o modelo economico e usado por padrao."
           },
           "allowed_specialists": {
             "items": {
@@ -1113,6 +1167,8 @@
           "instructions",
           "provider",
           "model_option",
+          "secondary_model_option",
+          "secondary_for",
           "allowed_specialists",
           "max_specialist_tasks",
           "max_output_tokens",
@@ -1120,6 +1176,40 @@
           "color"
         ],
         "title": "CandidateConfig"
+      },
+      "CatalogJudgePersona": {
+        "properties": {
+          "persona": {
+            "type": "string",
+            "title": "Persona"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "instructions": {
+            "type": "string",
+            "title": "Instructions"
+          },
+          "rubric": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Rubric"
+          }
+        },
+        "type": "object",
+        "required": [
+          "persona",
+          "name",
+          "description",
+          "instructions",
+          "rubric"
+        ],
+        "title": "CatalogJudgePersona"
       },
       "CatalogModelOption": {
         "properties": {
@@ -1255,6 +1345,13 @@
             "type": "object",
             "title": "Model Option By Provider"
           },
+          "secondary_by_provider": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Secondary By Provider"
+          },
           "allowed_specialists": {
             "items": {
               "type": "string"
@@ -1274,6 +1371,7 @@
           "description",
           "instructions",
           "model_option_by_provider",
+          "secondary_by_provider",
           "allowed_specialists",
           "max_specialist_tasks"
         ],
@@ -1336,6 +1434,13 @@
             "type": "object",
             "title": "Default Rubric"
           },
+          "judge_personas": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogJudgePersona"
+            },
+            "type": "array",
+            "title": "Judge Personas"
+          },
           "mock_scenarios": {
             "items": {
               "type": "string"
@@ -1359,6 +1464,7 @@
           "presets",
           "limits",
           "default_rubric",
+          "judge_personas",
           "mock_scenarios",
           "demo_preset_available"
         ],
@@ -1455,7 +1561,25 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Legado: juiz unico. Prefira 'judges'."
+          },
+          "judges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JudgeConfig-Input"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judges",
+            "description": "Painel de juizes; nota final = media ponderada."
           },
           "critique_rounds": {
             "type": "integer",
@@ -1592,7 +1716,25 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Legado: juiz unico. Prefira 'judges'."
+          },
+          "judges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JudgeConfig-Output"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judges",
+            "description": "Painel de juizes; nota final = media ponderada."
           },
           "critique_rounds": {
             "type": "integer",
@@ -1645,6 +1787,7 @@
           "candidate_count",
           "candidates",
           "judge",
+          "judges",
           "critique_rounds",
           "seed",
           "mock_scenario",
@@ -1927,6 +2070,22 @@
           "strict": {
             "type": "boolean",
             "title": "Strict"
+          },
+          "secondary_calls": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Secondary Calls",
+            "description": "Chamadas feitas no modelo economico, por candidato."
+          },
+          "secondary_savings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Secondary Savings",
+            "description": "Economia estimada vs. fazer as mesmas chamadas no modelo principal (precos versionados)."
           }
         },
         "additionalProperties": false,
@@ -1942,7 +2101,9 @@
           "calls_used",
           "calls_cap",
           "cap",
-          "strict"
+          "strict",
+          "secondary_calls",
+          "secondary_savings"
         ],
         "title": "CostBreakdown"
       },
@@ -2118,6 +2279,16 @@
             "type": "integer",
             "title": "Proposal Version"
           },
+          "judge_id": {
+            "type": "string",
+            "title": "Judge Id",
+            "default": "j1"
+          },
+          "judge_name": {
+            "type": "string",
+            "title": "Judge Name",
+            "default": "Padrão"
+          },
           "judge_label": {
             "type": "string",
             "title": "Judge Label"
@@ -2179,6 +2350,8 @@
         "required": [
           "candidate_id",
           "proposal_version",
+          "judge_id",
+          "judge_name",
           "judge_label",
           "rubric_hash",
           "pack_version",
@@ -2214,15 +2387,92 @@
       },
       "JudgeConfig-Input": {
         "properties": {
+          "judge_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Id",
+            "description": "Gerado pelo servidor (j1..jN) se ausente."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "default": "Padrão"
+          },
+          "persona": {
+            "type": "string",
+            "enum": [
+              "default",
+              "technical",
+              "business",
+              "ux",
+              "custom"
+            ],
+            "title": "Persona",
+            "default": "default"
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "description": "Perspectiva do juiz; entra no prompt de avaliacao.",
+            "default": ""
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Weight",
+            "description": "Influencia do juiz na nota final (relativa).",
+            "default": "1"
+          },
+          "rubric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rubric-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provider": {
-            "$ref": "#/components/schemas/Provider",
-            "default": "mock"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model_option": {
-            "type": "string",
-            "maxLength": 64,
-            "title": "Model Option",
-            "default": "mock-default"
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Option"
           },
           "max_output_tokens": {
             "type": "integer",
@@ -2234,19 +2484,87 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "JudgeConfig"
+        "title": "JudgeConfig",
+        "description": "Um juiz do painel. Sem provider/model_option o servidor usa o padrao do modo; sem rubrica, a do desafio."
       },
       "JudgeConfig-Output": {
         "properties": {
+          "judge_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Id",
+            "description": "Gerado pelo servidor (j1..jN) se ausente."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "default": "Padrão"
+          },
+          "persona": {
+            "type": "string",
+            "enum": [
+              "default",
+              "technical",
+              "business",
+              "ux",
+              "custom"
+            ],
+            "title": "Persona",
+            "default": "default"
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "description": "Perspectiva do juiz; entra no prompt de avaliacao.",
+            "default": ""
+          },
+          "weight": {
+            "type": "string",
+            "title": "Weight",
+            "description": "Influencia do juiz na nota final (relativa).",
+            "default": "1"
+          },
+          "rubric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rubric-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provider": {
-            "$ref": "#/components/schemas/Provider",
-            "default": "mock"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model_option": {
-            "type": "string",
-            "maxLength": 64,
-            "title": "Model Option",
-            "default": "mock-default"
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Option"
           },
           "max_output_tokens": {
             "type": "integer",
@@ -2259,11 +2577,62 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "judge_id",
+          "name",
+          "persona",
+          "instructions",
+          "weight",
+          "rubric",
           "provider",
           "model_option",
           "max_output_tokens"
         ],
-        "title": "JudgeConfig"
+        "title": "JudgeConfig",
+        "description": "Um juiz do painel. Sem provider/model_option o servidor usa o padrao do modo; sem rubrica, a do desafio."
+      },
+      "JudgeScore": {
+        "properties": {
+          "judge_id": {
+            "type": "string",
+            "title": "Judge Id"
+          },
+          "judge_name": {
+            "type": "string",
+            "title": "Judge Name"
+          },
+          "weight": {
+            "type": "string",
+            "title": "Weight"
+          },
+          "score_0_100": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score 0 100"
+          },
+          "grades": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Grades"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "judge_id",
+          "judge_name",
+          "weight",
+          "score_0_100",
+          "grades"
+        ],
+        "title": "JudgeScore"
       },
       "Objection": {
         "properties": {
@@ -2522,6 +2891,13 @@
             "type": "object",
             "title": "Grades"
           },
+          "judge_scores": {
+            "items": {
+              "$ref": "#/components/schemas/JudgeScore"
+            },
+            "type": "array",
+            "title": "Judge Scores"
+          },
           "efficiency": {
             "anyOf": [
               {
@@ -2562,11 +2938,13 @@
           "co_leader",
           "eligibility",
           "grades",
+          "judge_scores",
           "efficiency",
           "disqualification_reason",
           "notes"
         ],
-        "title": "RankingEntry"
+        "title": "RankingEntry",
+        "description": "score_0_100 = media ponderada (pelo peso de cada juiz) das notas dos juizes em judge_scores.\n'grades' traz as notas por criterio apenas quando o painel tem um unico juiz (compatibilidade)."
       },
       "Report": {
         "properties": {

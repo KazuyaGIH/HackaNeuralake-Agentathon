@@ -395,9 +395,20 @@ export interface components {
             provider: components["schemas"]["Provider"];
             /**
              * Model Option
+             * @description Modelo principal (planejar, propor, revisar).
              * @default mock-default
              */
             model_option: string;
+            /**
+             * Secondary Model Option
+             * @description Modelo economico opcional (mesmo provedor) para tarefas internas simples.
+             */
+            secondary_model_option?: string | null;
+            /**
+             * Secondary For
+             * @description Onde o modelo economico e usado por padrao.
+             */
+            secondary_for?: ("research" | "critique")[];
             /** Allowed Specialists */
             allowed_specialists?: components["schemas"]["SpecialistKind"][];
             /**
@@ -440,9 +451,20 @@ export interface components {
             provider: components["schemas"]["Provider"];
             /**
              * Model Option
+             * @description Modelo principal (planejar, propor, revisar).
              * @default mock-default
              */
             model_option: string;
+            /**
+             * Secondary Model Option
+             * @description Modelo economico opcional (mesmo provedor) para tarefas internas simples.
+             */
+            secondary_model_option: string | null;
+            /**
+             * Secondary For
+             * @description Onde o modelo economico e usado por padrao.
+             */
+            secondary_for: ("research" | "critique")[];
             /** Allowed Specialists */
             allowed_specialists: components["schemas"]["SpecialistKind"][];
             /**
@@ -463,6 +485,21 @@ export interface components {
             quota_weight: string;
             /** Color */
             color: string | null;
+        };
+        /** CatalogJudgePersona */
+        CatalogJudgePersona: {
+            /** Persona */
+            persona: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Instructions */
+            instructions: string;
+            /** Rubric */
+            rubric: {
+                [key: string]: unknown;
+            };
         };
         /** CatalogModelOption */
         CatalogModelOption: {
@@ -511,6 +548,10 @@ export interface components {
             model_option_by_provider: {
                 [key: string]: string;
             };
+            /** Secondary By Provider */
+            secondary_by_provider: {
+                [key: string]: string;
+            };
             /** Allowed Specialists */
             allowed_specialists: string[];
             /** Max Specialist Tasks */
@@ -546,6 +587,8 @@ export interface components {
             default_rubric: {
                 [key: string]: unknown;
             };
+            /** Judge Personas */
+            judge_personas: components["schemas"]["CatalogJudgePersona"][];
             /** Mock Scenarios */
             mock_scenarios: string[];
             /** Demo Preset Available */
@@ -586,7 +629,13 @@ export interface components {
             candidate_count: number;
             /** Candidates */
             candidates?: components["schemas"]["CandidateConfig-Input"][] | null;
+            /** @description Legado: juiz unico. Prefira 'judges'. */
             judge?: components["schemas"]["JudgeConfig-Input"] | null;
+            /**
+             * Judges
+             * @description Painel de juizes; nota final = media ponderada.
+             */
+            judges?: components["schemas"]["JudgeConfig-Input"][] | null;
             /**
              * Critique Rounds
              * @default 1
@@ -638,7 +687,13 @@ export interface components {
             candidate_count: number;
             /** Candidates */
             candidates: components["schemas"]["CandidateConfig-Output"][] | null;
+            /** @description Legado: juiz unico. Prefira 'judges'. */
             judge: components["schemas"]["JudgeConfig-Output"] | null;
+            /**
+             * Judges
+             * @description Painel de juizes; nota final = media ponderada.
+             */
+            judges: components["schemas"]["JudgeConfig-Output"][] | null;
             /**
              * Critique Rounds
              * @default 1
@@ -750,6 +805,20 @@ export interface components {
             cap: string | null;
             /** Strict */
             strict: boolean;
+            /**
+             * Secondary Calls
+             * @description Chamadas feitas no modelo economico, por candidato.
+             */
+            secondary_calls: {
+                [key: string]: number;
+            };
+            /**
+             * Secondary Savings
+             * @description Economia estimada vs. fazer as mesmas chamadas no modelo principal (precos versionados).
+             */
+            secondary_savings: {
+                [key: string]: string;
+            };
         };
         /**
          * CostQuality
@@ -808,6 +877,16 @@ export interface components {
             candidate_id: string;
             /** Proposal Version */
             proposal_version: number;
+            /**
+             * Judge Id
+             * @default j1
+             */
+            judge_id: string;
+            /**
+             * Judge Name
+             * @default Padrão
+             */
+            judge_name: string;
             /** Judge Label */
             judge_label: string;
             /** Rubric Hash */
@@ -840,35 +919,106 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** JudgeConfig */
+        /**
+         * JudgeConfig
+         * @description Um juiz do painel. Sem provider/model_option o servidor usa o padrao do modo; sem rubrica, a do desafio.
+         */
         "JudgeConfig-Input": {
-            /** @default mock */
-            provider: components["schemas"]["Provider"];
             /**
-             * Model Option
-             * @default mock-default
+             * Judge Id
+             * @description Gerado pelo servidor (j1..jN) se ausente.
              */
-            model_option: string;
+            judge_id?: string | null;
+            /**
+             * Name
+             * @default Padrão
+             */
+            name: string;
+            /**
+             * Persona
+             * @default default
+             * @enum {string}
+             */
+            persona: "default" | "technical" | "business" | "ux" | "custom";
+            /**
+             * Instructions
+             * @description Perspectiva do juiz; entra no prompt de avaliacao.
+             * @default
+             */
+            instructions: string;
+            /**
+             * Weight
+             * @description Influencia do juiz na nota final (relativa).
+             * @default 1
+             */
+            weight: number | string;
+            rubric?: components["schemas"]["Rubric-Input"] | null;
+            provider?: components["schemas"]["Provider"] | null;
+            /** Model Option */
+            model_option?: string | null;
             /**
              * Max Output Tokens
              * @default 3000
              */
             max_output_tokens: number;
         };
-        /** JudgeConfig */
+        /**
+         * JudgeConfig
+         * @description Um juiz do painel. Sem provider/model_option o servidor usa o padrao do modo; sem rubrica, a do desafio.
+         */
         "JudgeConfig-Output": {
-            /** @default mock */
-            provider: components["schemas"]["Provider"];
             /**
-             * Model Option
-             * @default mock-default
+             * Judge Id
+             * @description Gerado pelo servidor (j1..jN) se ausente.
              */
-            model_option: string;
+            judge_id: string | null;
+            /**
+             * Name
+             * @default Padrão
+             */
+            name: string;
+            /**
+             * Persona
+             * @default default
+             * @enum {string}
+             */
+            persona: "default" | "technical" | "business" | "ux" | "custom";
+            /**
+             * Instructions
+             * @description Perspectiva do juiz; entra no prompt de avaliacao.
+             * @default
+             */
+            instructions: string;
+            /**
+             * Weight
+             * @description Influencia do juiz na nota final (relativa).
+             * @default 1
+             */
+            weight: string;
+            rubric: components["schemas"]["Rubric-Output"] | null;
+            provider: components["schemas"]["Provider"] | null;
+            /** Model Option */
+            model_option: string | null;
             /**
              * Max Output Tokens
              * @default 3000
              */
             max_output_tokens: number;
+        };
+        /** JudgeScore */
+        JudgeScore: {
+            /** Judge Id */
+            judge_id: string;
+            /** Judge Name */
+            judge_name: string;
+            /** Weight */
+            weight: string;
+            /** Score 0 100 */
+            score_0_100: string | null;
+            /** Grades */
+            grades: {
+                [key: string]: string;
+            };
         };
         /** Objection */
         Objection: {
@@ -935,7 +1085,11 @@ export interface components {
          * @enum {string}
          */
         Provider: "mock" | "neuralake";
-        /** RankingEntry */
+        /**
+         * RankingEntry
+         * @description score_0_100 = media ponderada (pelo peso de cada juiz) das notas dos juizes em judge_scores.
+         *     'grades' traz as notas por criterio apenas quando o painel tem um unico juiz (compatibilidade).
+         */
         RankingEntry: {
             /** Candidate Id */
             candidate_id: string;
@@ -957,6 +1111,8 @@ export interface components {
             grades: {
                 [key: string]: string;
             };
+            /** Judge Scores */
+            judge_scores: components["schemas"]["JudgeScore"][];
             efficiency: components["schemas"]["EfficiencyInfo"] | null;
             /** Disqualification Reason */
             disqualification_reason: string | null;

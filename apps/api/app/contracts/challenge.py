@@ -13,6 +13,7 @@ MAX_CONCURRENT_CALLS = 4
 MAX_ATTEMPTS = 2
 MAX_SOURCES = 5
 MAX_CRITIQUE_ROUNDS = 1
+MAX_JUDGES = 6
 
 EFFICIENCY_CRITERION_ID = "efficiency"
 
@@ -93,6 +94,72 @@ def default_rubric() -> Rubric:
     )
 
 
+def _c(cid: str, name: str, description: str, weight: int, computed_by: Literal["judge", "server_efficiency"] = "judge") -> RubricCriterion:
+    return RubricCriterion(criterion_id=cid, name=name, description=description, weight=Decimal(weight), computed_by=computed_by)
+
+
+JudgePersona = Literal["default", "technical", "business", "ux", "custom"]
+
+# Personas de juiz prontas: cada uma avalia sob uma perspectiva propria, com rubrica propria (pesos somam 100).
+JUDGE_PERSONAS: dict[str, dict[str, str]] = {
+    "default": {
+        "name": "Padrão",
+        "description": "Avaliação geral: aderência ao objetivo, evidências, raciocínio, completude e eficiência.",
+        "instructions": "",
+    },
+    "technical": {
+        "name": "Especialista Técnico",
+        "description": "Avalia a complexidade técnica, a viabilidade da arquitetura e se a tecnologia usada realmente funciona.",
+        "instructions": (
+            "Avalie como um especialista tecnico senior. Julgue a complexidade e a qualidade tecnica da solucao, a "
+            "viabilidade da arquitetura proposta e se as tecnologias escolhidas de fato funcionam para o caso, "
+            "com base nas evidencias. Penalize afirmacoes tecnicas sem sustentacao."
+        ),
+    },
+    "business": {
+        "name": "Especialista em Negócios",
+        "description": "Investidores e Product Managers: potencial de mercado, monetização e se resolve uma dor real.",
+        "instructions": (
+            "Avalie como um investidor e product manager. Julgue o potencial de mercado, a clareza do modelo de "
+            "monetizacao ou retorno financeiro e se a proposta resolve uma dor real e relevante para o cliente."
+        ),
+    },
+    "ux": {
+        "name": "Designer / Especialista em UX",
+        "description": "Julga a experiência do usuário, a interface, a usabilidade e a clareza da solução apresentada.",
+        "instructions": (
+            "Avalie como um designer e especialista em UX. Julgue a experiencia de quem vai usar a solucao, a "
+            "interface proposta, a usabilidade e a clareza com que a solucao e apresentada e explicada."
+        ),
+    },
+}
+
+
+def persona_rubric(persona: str) -> Rubric:
+    if persona == "technical":
+        return Rubric(criteria=[
+            _c("technical_complexity", "Complexidade e qualidade técnica", "Profundidade técnica adequada ao problema, sem complexidade desnecessária.", 30),
+            _c("architecture_viability", "Viabilidade da arquitetura", "A arquitetura é implementável dentro das restrições e escala para o caso.", 30),
+            _c("technology_fit", "A tecnologia realmente funciona", "As tecnologias escolhidas são maduras e comprovadas para este uso.", 25),
+            _c(EFFICIENCY_CRITERION_ID, "Eficiência da execução", "Consumo da equipe em relação à cota: 10 * max(0, 1 - cost/quota). Calculado pelo servidor.", 15, "server_efficiency"),
+        ])
+    if persona == "business":
+        return Rubric(criteria=[
+            _c("real_pain", "Resolve uma dor real", "Ataca um problema relevante e concreto do cliente.", 35),
+            _c("market_potential", "Potencial de mercado", "Tamanho da oportunidade e diferencial frente às alternativas.", 30),
+            _c("monetization", "Modelo de monetização", "Caminho claro de receita, economia ou retorno sobre o investimento.", 25),
+            _c(EFFICIENCY_CRITERION_ID, "Eficiência da execução", "Consumo da equipe em relação à cota: 10 * max(0, 1 - cost/quota). Calculado pelo servidor.", 10, "server_efficiency"),
+        ])
+    if persona == "ux":
+        return Rubric(criteria=[
+            _c("user_experience", "Experiência do usuário", "A jornada de quem usa a solução é simples e agradável.", 30),
+            _c("usability", "Usabilidade", "Fácil de aprender e de usar, com poucos passos e erros.", 25),
+            _c("interface", "Interface", "A interface proposta é adequada ao público e ao contexto.", 20),
+            _c("clarity", "Clareza da solução", "A proposta é apresentada de forma clara e fácil de entender.", 25),
+        ])
+    return default_rubric()
+
+
 class Constraint(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +201,9 @@ class BudgetConfig(ContractModel):
     max_attempts_per_call: int = Field(default=MAX_ATTEMPTS, ge=1, le=MAX_ATTEMPTS)
 
 
+SecondaryUse = Literal["research", "critique"]
+
+
 class CandidateConfig(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -142,7 +212,13 @@ class CandidateConfig(ContractModel):
     preset: Literal["balanced", "cost", "robust", "explorer"] | None = None
     instructions: str = Field(default="", max_length=6000, description="Instrucoes estrategicas privadas do pensante.")
     provider: Provider = Provider.MOCK
-    model_option: str = Field(default="mock-default", max_length=64)
+    model_option: str = Field(default="mock-default", max_length=64, description="Modelo principal (planejar, propor, revisar).")
+    secondary_model_option: str | None = Field(
+        default=None, max_length=64, description="Modelo economico opcional (mesmo provedor) para tarefas internas simples."
+    )
+    secondary_for: list[SecondaryUse] = Field(
+        default_factory=lambda: ["research"], max_length=2, description="Onde o modelo economico e usado por padrao."
+    )
     allowed_specialists: list[SpecialistKind] = Field(
         default_factory=lambda: [SpecialistKind.DOCUMENT_RESEARCH, SpecialistKind.CALCULATION]
     )
@@ -153,10 +229,18 @@ class CandidateConfig(ContractModel):
 
 
 class JudgeConfig(ContractModel):
+    """Um juiz do painel. Sem provider/model_option o servidor usa o padrao do modo; sem rubrica, a do desafio."""
+
     model_config = ConfigDict(extra="forbid")
 
-    provider: Provider = Provider.MOCK
-    model_option: str = Field(default="mock-default", max_length=64)
+    judge_id: Slug | None = Field(default=None, description="Gerado pelo servidor (j1..jN) se ausente.")
+    name: str = Field(default="Padrão", min_length=1, max_length=60)
+    persona: JudgePersona = "default"
+    instructions: str = Field(default="", max_length=4000, description="Perspectiva do juiz; entra no prompt de avaliacao.")
+    weight: Money = Field(default=Decimal("1"), gt=0, le=100, description="Influencia do juiz na nota final (relativa).")
+    rubric: Rubric | None = None
+    provider: Provider | None = None
+    model_option: str | None = Field(default=None, max_length=64)
     max_output_tokens: int = Field(default=3000, ge=300, le=8000)
 
 
@@ -176,7 +260,8 @@ class ChallengeConfig(ContractModel):
     config_mode: Literal["auto", "manual"] = "auto"
     candidate_count: int = Field(default=2, ge=MIN_CANDIDATES, le=MAX_CANDIDATES)
     candidates: list[CandidateConfig] | None = Field(default=None, max_length=MAX_CANDIDATES)
-    judge: JudgeConfig | None = None
+    judge: JudgeConfig | None = Field(default=None, description="Legado: juiz unico. Prefira 'judges'.")
+    judges: list[JudgeConfig] | None = Field(default=None, min_length=1, max_length=MAX_JUDGES, description="Painel de juizes; nota final = media ponderada.")
     critique_rounds: int = Field(default=1, ge=0, le=MAX_CRITIQUE_ROUNDS)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
     mock_scenario: str = Field(default="default", max_length=64, description="Somente em modo mock.")
@@ -201,6 +286,13 @@ class ChallengeConfig(ContractModel):
             given_ids = [c.candidate_id for c in self.candidates if c.candidate_id]
             if len(given_ids) != len(set(given_ids)):
                 raise ValueError("candidate_id duplicado")
+        if self.judges:
+            names = [j.name.strip().lower() for j in self.judges]
+            if len(names) != len(set(names)):
+                raise ValueError("nomes de juizes devem ser unicos")
+            given = [j.judge_id for j in self.judges if j.judge_id]
+            if len(given) != len(set(given)):
+                raise ValueError("judge_id duplicado")
         if self.mode == ExecutionMode.REAL and self.budget.total_cap is None:
             raise ValueError("modo real exige budget.total_cap explicito")
         if self.mode == ExecutionMode.REAL and self.mock_scenario != "default":

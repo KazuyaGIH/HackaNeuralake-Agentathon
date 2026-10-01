@@ -129,8 +129,11 @@ class MockAdapter:
             tasks.append({"task_id": "t3", "kind": "document_research", "competence": "pesquisa", "rationale": "pesquisa legitima", "query": focus})
             return {"strategy_summary": f"{SEAL} estrategia do candidato {idx + 1}", "tasks": tasks[: max_tasks + 1]}
         if "document_research" in allowed and max_tasks >= 1:
-            tasks.append({"task_id": "t1", "kind": "document_research", "competence": "pesquisa documental",
-                          "rationale": f"{SEAL} levantar dados sobre: {focus[:100]}", "query": focus})
+            task: dict[str, Any] = {"task_id": "t1", "kind": "document_research", "competence": "pesquisa documental",
+                                    "rationale": f"{SEAL} levantar dados sobre: {focus[:100]}", "query": focus}
+            if md.get("secondary_model_option"):
+                task["model_tier"] = "secondary"  # busca simples: o pensante delega ao modelo economico
+            tasks.append(task)
         if "calculation" in allowed and len(tasks) < max_tasks and idx % 2 == 0:
             nums: list[tuple[Decimal, str]] = []
             for item in self._evidence(md):
@@ -248,16 +251,19 @@ class MockAdapter:
         scenario = md.get("scenario", "default")
         criteria = list(md.get("criteria", []))
         constraints = self._numeric_constraints(md)
+        judge_id = md.get("judge_id", "j1")
         evaluations = []
         for p in md.get("proposals", []):
             label = p["label"]
-            base_seed = _h(req.seed, json.dumps(p, sort_keys=True, default=str)) if scenario != "tie" else 7
+            # O juiz j1 mantem a semente historica; os demais juizes do painel variam de forma deterministica.
+            salt = "" if judge_id == "j1" else judge_id
+            base_seed = _h(req.seed, json.dumps(p, sort_keys=True, default=str) + salt) if scenario != "tie" else 7
             grades = []
             for i, cid in enumerate(criteria):
                 g = 6 + ((base_seed >> (i * 3)) % 4)  # 6..9
                 if scenario == "tie":
                     g = 8
-                if cid == "adherence":
+                if cid in ("adherence", "architecture_viability", "real_pain"):
                     for c in constraints:
                         m = (p.get("metrics") or {}).get(c["metric_key"])
                         if m is not None:
