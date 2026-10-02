@@ -182,7 +182,7 @@ async def test_client_brings_own_neuralake_key_kept_only_in_memory(tmp_path) -> 
         events = await client.get(f"/api/v1/runs/{run_id}/events/list")
         assert secret not in detail.text and secret not in events.text
         executor = app.state.executor
-        assert executor.run_keys[run_id] == secret
+        assert executor.run_keys[run_id] == {"neuralake": secret}
         ctx = await executor.build_context(run_id)
         assert ctx.adapters["neuralake"]._api_key == secret and run_id not in executor.run_keys  # consumida
         # Simulado nao guarda chave nenhuma.

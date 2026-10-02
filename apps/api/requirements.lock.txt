@@ -1,13 +1,15 @@
-﻿aiosqlite==0.22.1
+aiosqlite==0.22.1
 alembic==1.20.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
+anthropic==1.11.0
 anyio==4.15.1
 certifi==2026.7.22
 charset-normalizer==3.5.2
 click==8.5.0
 colorama==0.4.6
 distro==1.9.0
+docstring_parser==0.18.0
 fastapi==0.142.2
 greenlet==3.5.6
 h11==0.16.0
@@ -18,6 +20,7 @@ httpx==0.28.1
 httpx2==2.13.1
 idna==3.20
 iniconfig==2.3.0
+jiter==0.17.0
 jsonpatch==1.33
 jsonpointer==3.1.1
 langchain-core==1.6.6
@@ -34,9 +37,9 @@ orjson==3.12.0
 ormsgpack==1.12.2
 packaging==26.3
 pluggy==1.6.0
+pydantic_core==2.46.5
 pydantic==2.13.5
 pydantic-settings==2.15.0
-pydantic_core==2.46.5
 Pygments==2.21.0
 pypdf==6.19.0
 pytest==9.1.1
@@ -51,8 +54,8 @@ SQLAlchemy==2.1.1
 starlette==1.7.0
 tenacity==9.1.4
 truststore==0.10.4
-typing-inspection==0.4.4
 typing_extensions==4.16.0
+typing-inspection==0.4.4
 urllib3==2.8.0
 uuid_utils==0.17.1
 uvicorn==0.54.0

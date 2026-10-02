@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     )
     neuralake_base_url: str = "https://api.neuralake.cloud/v1"
     neuralake_json_mode: bool = Field(default=False, description="Envia response_format=json_object (compatibilidade nao confirmada).")
+    # Outros provedores (chaves opcionais no servidor; o usuario tambem pode trazer a propria pelo navegador).
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    anthropic_api_key: str | None = None
     neuralake_prices_file: Path | None = Field(
         default=REPO_DIR / "fixtures" / "prices" / "neuralake.public-2026-09-30.json",
         description="Tabela de precos versionada. Default: pagina publica de precos (estimativa, nao fatura).",

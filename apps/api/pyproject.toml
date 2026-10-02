@@ -15,6 +15,7 @@ dependencies = [
   "python-multipart>=0.0.32",
   "pypdf>=6.19,<7",
   "langgraph>=1.2,<2",
+  "anthropic>=1.11,<2",
 ]
 
 [project.optional-dependencies]

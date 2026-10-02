@@ -93,6 +93,7 @@ export function emptyConfig(catalog: CatalogResponse | null): ChallengeConfig {
     tags: [],
     refinement: null,
     action_plan: null,
+    real_provider: "neuralake",
   };
 }
 

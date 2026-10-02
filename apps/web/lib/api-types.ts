@@ -795,6 +795,11 @@ export interface components {
             /** @default mock */
             mode: components["schemas"]["ExecutionMode"];
             /**
+             * @description Modo real: provedor padrao das equipes automaticas e dos juizes sem modelo escolhido.
+             * @default neuralake
+             */
+            real_provider: components["schemas"]["Provider"];
+            /**
              * Config Mode
              * @default auto
              * @enum {string}
@@ -856,6 +861,11 @@ export interface components {
             budget: components["schemas"]["BudgetConfig-Output"];
             /** @default mock */
             mode: components["schemas"]["ExecutionMode"];
+            /**
+             * @description Modo real: provedor padrao das equipes automaticas e dos juizes sem modelo escolhido.
+             * @default neuralake
+             */
+            real_provider: components["schemas"]["Provider"];
             /**
              * Config Mode
              * @default auto
@@ -1275,7 +1285,7 @@ export interface components {
          * Provider
          * @enum {string}
          */
-        Provider: "mock" | "neuralake";
+        Provider: "mock" | "neuralake" | "openai" | "gemini" | "anthropic";
         /**
          * RankingEntry
          * @description score_0_100 = media ponderada (pelo peso de cada juiz) das notas dos juizes em judge_scores.

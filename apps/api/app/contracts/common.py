@@ -27,6 +27,13 @@ class ExecutionMode(StrEnum):
 class Provider(StrEnum):
     MOCK = "mock"
     NEURALAKE = "neuralake"
+    OPENAI = "openai"
+    GEMINI = "gemini"
+    ANTHROPIC = "anthropic"
+
+
+# Provedores reais (gastam creditos). A chave pode vir do servidor ou do navegador de quem usa.
+REAL_PROVIDERS = (Provider.NEURALAKE, Provider.OPENAI, Provider.GEMINI, Provider.ANTHROPIC)
 
 
 class RunStatus(StrEnum):

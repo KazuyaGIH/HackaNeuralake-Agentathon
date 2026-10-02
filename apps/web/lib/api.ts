@@ -11,7 +11,7 @@ export type JudgePersona = components["schemas"]["CatalogJudgePersona"];
 export type CatalogResponse = Omit<components["schemas"]["CatalogResponse"], "limits" | "specialists" | "providers"> & {
   limits: Record<string, Record<string, number>>;
   specialists: { kind: string; label: string; description: string; uses_inference: boolean }[];
-  providers: Record<string, { enabled: boolean; label: string; simulated: boolean; unavailable_reason?: string | null; notes?: string; base_url?: string; requires_password?: boolean; accepts_client_key?: boolean }>;
+  providers: Record<string, { enabled: boolean; label: string; simulated: boolean; unavailable_reason?: string | null; notes?: string; base_url?: string; requires_password?: boolean; accepts_client_key?: boolean; key_hint?: string; default_model?: string }>;
 };
 export type RunDetail = components["schemas"]["RunDetail"];
 export type RunSummary = components["schemas"]["RunSummary"];
@@ -118,20 +118,32 @@ export const realKey = {
   get: (): string => (typeof window === "undefined" ? "" : (window.localStorage.getItem(REAL_KEY) ?? "")),
   set: (v: string) => (v ? window.localStorage.setItem(REAL_KEY, v) : window.localStorage.removeItem(REAL_KEY)),
 };
-// Chave NeuraLake do proprio usuario: fica so neste navegador; o servidor usa em memoria so durante a arena.
-const NL_KEY = "agentathon:neuralake-key";
-export const neuralakeKey = {
-  get: (): string => (typeof window === "undefined" ? "" : (window.localStorage.getItem(NL_KEY) ?? "")),
-  set: (v: string) => (v ? window.localStorage.setItem(NL_KEY, v) : window.localStorage.removeItem(NL_KEY)),
+// Chaves de IA do proprio usuario (uma por provedor): ficam so neste navegador; o servidor usa em memoria so
+// durante a arena e nao salva em lugar nenhum.
+export const REAL_PROVIDERS = ["neuralake", "openai", "gemini", "anthropic"] as const;
+export type RealProvider = (typeof REAL_PROVIDERS)[number];
+const KEY_HEADER: Record<RealProvider, string> = { neuralake: "X-NeuraLake-Key", openai: "X-OpenAI-Key", gemini: "X-Gemini-Key", anthropic: "X-Anthropic-Key" };
+const storageKey = (p: RealProvider) => `agentathon:${p}-key`;
+export const providerKeys = {
+  get: (p: RealProvider): string => (typeof window === "undefined" ? "" : (window.localStorage.getItem(storageKey(p)) ?? "")),
+  set: (p: RealProvider, v: string) => (v ? window.localStorage.setItem(storageKey(p), v) : window.localStorage.removeItem(storageKey(p))),
 };
-const keyHeader = (): Record<string, string> => ({
-  ...(realKey.get() ? { "X-Agentathon-Key": realKey.get() } : {}),
-  ...(neuralakeKey.get() ? { "X-NeuraLake-Key": neuralakeKey.get() } : {}),
-});
+const keyHeader = (): Record<string, string> => {
+  const h: Record<string, string> = realKey.get() ? { "X-Agentathon-Key": realKey.get() } : {};
+  for (const p of REAL_PROVIDERS) if (providerKeys.get(p)) h[KEY_HEADER[p]] = providerKeys.get(p);
+  return h;
+};
 
-// NeuraLake disponivel: chave no servidor OU chave do usuario neste navegador.
+// Provedor disponivel: chave no servidor OU chave do usuario neste navegador.
+export function providerEnabled(catalog: CatalogResponse | null, p: string): boolean {
+  if (p === "mock") return true;
+  return catalog?.providers?.[p]?.enabled === true || (REAL_PROVIDERS as readonly string[]).includes(p) && Boolean(providerKeys.get(p as RealProvider));
+}
+export function enabledRealProviders(catalog: CatalogResponse | null): RealProvider[] {
+  return REAL_PROVIDERS.filter((p) => providerEnabled(catalog, p));
+}
 export function realEnabled(catalog: CatalogResponse | null): boolean {
-  return catalog?.providers?.neuralake?.enabled === true || Boolean(neuralakeKey.get());
+  return enabledRealProviders(catalog).length > 0;
 }
 
 export const api = {

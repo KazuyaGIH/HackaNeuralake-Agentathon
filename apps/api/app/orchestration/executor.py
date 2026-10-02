@@ -36,9 +36,9 @@ class Executor:
         self._wake = asyncio.Event()
         self._stopping = False
         self.current_run_id: str | None = None
-        # Chave NeuraLake trazida pelo navegador (X-NeuraLake-Key): so em memoria, consumida quando o run comeca.
-        # Nunca vai para snapshot, banco, eventos ou logs; se o servidor reiniciar antes, o run fica sem a chave.
-        self.run_keys: dict[str, str] = {}
+        # Chaves trazidas pelo navegador (X-<Provedor>-Key), por run e provedor: so em memoria, consumidas quando o
+        # run comeca. Nunca vao para snapshot, banco, eventos ou logs; se o servidor reiniciar antes, o run fica sem elas.
+        self.run_keys: dict[str, dict[str, str]] = {}
 
     async def mark_interrupted(self) -> list[str]:
         """Reinicio do servidor: trabalho ativo vira `interrupted`; nenhuma chamada e repetida."""
@@ -100,12 +100,13 @@ class Executor:
             run = (await s.execute(select(Run).where(Run.id == run_id))).scalar_one()
         snapshot = ChallengeConfig.model_validate(run.snapshot)
         ledger = Ledger(self.prices, strict=snapshot.budget.strict)
-        adapters = self.adapters
-        client_key = self.run_keys.pop(run_id, None)
-        if client_key:
-            from app.providers.neuralake import NeuraLakeAdapter
+        adapters = dict(self.adapters)
+        client_keys = self.run_keys.pop(run_id, None) or {}
+        if client_keys:
+            from app.providers.registry import build_adapter
 
-            adapters = {**self.adapters, "neuralake": NeuraLakeAdapter(api_key=client_key, base_url=self.settings.neuralake_base_url, json_mode=self.settings.neuralake_json_mode)}
+            for prov, key in client_keys.items():
+                adapters[prov] = build_adapter(prov, key, self.settings)
         return RunContext(
             run_id=run.id, owner_id=run.owner_id, snapshot=snapshot, seed=run.seed, hashes=dict(run.snapshot_hashes),
             settings=self.settings, db=self.db, catalog=self.catalog, adapters=adapters, ledger=ledger, notifier=self.notifier,

@@ -294,6 +294,9 @@ class ChallengeConfig(ContractModel):
     rubric: Rubric = Field(default_factory=default_rubric)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     mode: ExecutionMode = ExecutionMode.MOCK
+    real_provider: Provider = Field(
+        default=Provider.NEURALAKE, description="Modo real: provedor padrao das equipes automaticas e dos juizes sem modelo escolhido.",
+    )
     config_mode: Literal["auto", "manual"] = "auto"
     candidate_count: int = Field(default=2, ge=MIN_CANDIDATES, le=MAX_CANDIDATES)
     candidates: list[CandidateConfig] | None = Field(default=None, max_length=MAX_CANDIDATES)
@@ -310,6 +313,8 @@ class ChallengeConfig(ContractModel):
     def _check(self) -> "ChallengeConfig":
         if self.refinement is not None and self.action_plan is not None:
             raise ValueError("refinement e action_plan sao exclusivos")
+        if self.real_provider == Provider.MOCK:
+            raise ValueError("real_provider deve ser um provedor real")
         ids = [c.constraint_id for c in self.constraints]
         if len(ids) != len(set(ids)):
             raise ValueError("constraint_id duplicado")

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { neuralakeKey, realEnabled, realKey, type CandidateConfig, type CatalogResponse, type ChallengeConfig, type Constraint, type JudgeConfig, type Rubric, type RunSummary, type SourceCreateResponse } from "@/lib/api";
+import { REAL_PROVIDERS, enabledRealProviders, providerEnabled, providerKeys, realEnabled, realKey, type RealProvider, type CandidateConfig, type CatalogResponse, type ChallengeConfig, type Constraint, type JudgeConfig, type Rubric, type RunSummary, type SourceCreateResponse } from "@/lib/api";
 import { DECISION_LABEL, STATUS_LABEL, ago } from "@/lib/format";
 import { PERSONA_COLOR, judgeFromPersona } from "@/lib/projects";
 import Icon, { type IconName } from "../Icon";
@@ -32,13 +32,21 @@ export function blockers(cfg: ChallengeConfig, catalog: CatalogResponse | null):
   if (!panelOf(cfg).length) out.push("Adicione pelo menos um juiz (aba Juízes).");
   if (panelOf(cfg).some((j) => j.rubric?.criteria.some((c) => c.computed_by === "server_efficiency")) && !cfg.budget.total_cap)
     out.push("O critério de eficiência exige um teto de gasto (aba Orçamento).");
-  if (cfg.mode === "real" && !realEnabled(catalog)) out.push("O modo real está indisponível: cole a sua chave da NeuraLake na aba Orçamento e modo.");
+  if (cfg.mode === "real" && !realEnabled(catalog)) out.push("O modo real está indisponível: conecte a chave de pelo menos uma IA na aba Orçamento e modo.");
+  if (cfg.mode === "real" && realEnabled(catalog)) {
+    const label = (p: string) => catalog?.providers?.[p]?.label ?? p;
+    const missing = new Set<string>();
+    if (!providerEnabled(catalog, cfg.real_provider)) missing.add(cfg.real_provider);
+    if (cfg.config_mode === "manual") cfg.candidates?.forEach((c) => !providerEnabled(catalog, c.provider) && missing.add(c.provider));
+    panelOf(cfg).forEach((j) => j.provider && !providerEnabled(catalog, j.provider) && missing.add(j.provider));
+    if (missing.size) out.push(`Falta conectar a chave de: ${[...missing].map(label).join(", ")} (aba Orçamento e modo), ou troque a IA de quem usa.`);
+  }
   return out;
 }
 
-function defaultCandidate(i: number, catalog: CatalogResponse, mode: string): CandidateConfig {
+function defaultCandidate(i: number, catalog: CatalogResponse, cfg: ChallengeConfig): CandidateConfig {
   const preset = catalog.presets[i % catalog.presets.length];
-  const provider = mode === "mock" ? "mock" : "neuralake";
+  const provider = cfg.mode === "mock" ? "mock" : cfg.real_provider;
   return {
     candidate_id: null,
     name: `Equipe ${preset.label}`,
@@ -373,7 +381,8 @@ function JudgeCard({ judge, index, open, onToggle, onChange, onRemove, canRemove
   const sum = weightSum(rubric);
   const color = PERSONA_COLOR[judge.persona] ?? PERSONA_COLOR.custom;
   const persona = catalog.judge_personas.find((p) => p.persona === judge.persona);
-  const options = catalog.model_options.filter((m) => (m.enabled || (m.provider === "neuralake" && realEnabled(catalog))) && (mode === "mock" ? m.provider === "mock" : m.provider !== "mock"));
+  const options = catalog.model_options.filter((m) => (mode === "mock" ? m.provider === "mock" : m.provider !== "mock" && providerEnabled(catalog, m.provider)));
+  const provLabel = (p: string) => catalog.providers?.[p]?.label ?? p;
   const setCriteria = (criteria: Rubric["criteria"]) => onChange({ rubric: { ...rubric, criteria } });
   const setCriterion = (i: number, patch: Partial<Rubric["criteria"][number]>) => setCriteria(rubric.criteria.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
@@ -422,11 +431,23 @@ function JudgeCard({ judge, index, open, onToggle, onChange, onRemove, canRemove
                 }}
               >
                 <option value="">Padrão do modo</option>
-                {options.map((m) => (
-                  <option key={`${m.provider}|${m.option}`} value={`${m.provider}|${m.option}`}>
-                    {m.label}
-                  </option>
-                ))}
+                {mode === "mock"
+                  ? options.map((m) => (
+                      <option key={`${m.provider}|${m.option}`} value={`${m.provider}|${m.option}`}>
+                        {m.label}
+                      </option>
+                    ))
+                  : [...new Set(options.map((m) => m.provider))].map((p) => (
+                      <optgroup key={p} label={provLabel(p)}>
+                        {options
+                          .filter((m) => m.provider === p)
+                          .map((m) => (
+                            <option key={`${m.provider}|${m.option}`} value={`${m.provider}|${m.option}`}>
+                              {m.label}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))}
               </select>
             </div>
           </div>
@@ -600,8 +621,18 @@ function TeamCard({ c, index, open, onToggle, onChange, onRemove, canRemove, cat
   mode: string;
 }) {
   const color = c.color ?? TEAM_COLORS[index % TEAM_COLORS.length];
-  const options = catalog.model_options.filter((m) => (m.enabled || (m.provider === "neuralake" && realEnabled(catalog))) && (mode === "mock" ? m.provider === "mock" : m.provider !== "mock"));
+  // Cada equipe usa um provedor (no modo real: qualquer um com chave conectada); os modelos sao desse provedor.
+  const providers = mode === "mock" ? ["mock"] : enabledRealProviders(catalog);
+  const options = catalog.model_options.filter((m) => m.provider === c.provider);
   const find = (opt: string | null | undefined) => options.find((m) => m.option === opt);
+  function switchProvider(p: string) {
+    const preset = catalog.presets.find((x) => x.preset === c.preset);
+    onChange({
+      provider: p as CandidateConfig["provider"],
+      model_option: preset?.model_option_by_provider[p] ?? catalog.providers?.[p]?.default_model ?? catalog.model_options.find((m) => m.provider === p)?.option ?? "",
+      secondary_model_option: preset?.secondary_by_provider?.[p] ?? null,
+    });
+  }
   const ratio = cheaperBy(find(c.model_option), find(c.secondary_model_option));
   const uses = new Set(c.secondary_for ?? []);
   const toggleUse = (u: "research" | "critique", on: boolean) => {
@@ -675,6 +706,19 @@ function TeamCard({ c, index, open, onToggle, onChange, onRemove, canRemove, cat
 
           <section>
             <h4>Modelos</h4>
+            {mode !== "mock" && (
+              <div className="field" style={{ maxWidth: 320 }}>
+                <label>IA usada por esta equipe</label>
+                <select value={c.provider} onChange={(e) => switchProvider(e.target.value)}>
+                  {!providers.includes(c.provider as RealProvider) && <option value={c.provider}>{catalog.providers?.[c.provider]?.label ?? c.provider} (sem chave conectada)</option>}
+                  {providers.map((p) => (
+                    <option key={p} value={p}>
+                      {catalog.providers?.[p]?.label ?? p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="model-pair">
               <div className="model-box main">
                 <div className="model-box-head">
@@ -774,12 +818,12 @@ function TeamCard({ c, index, open, onToggle, onChange, onRemove, canRemove, cat
 
 export function TeamsTab({ cfg, update, catalog }: Base) {
   const [open, setOpen] = useState<number | null>(null);
-  const provider = cfg.mode === "mock" ? "mock" : "neuralake";
+  const provider = cfg.mode === "mock" ? "mock" : cfg.real_provider;
 
   function switchConfigMode(mode: "auto" | "manual") {
     if (mode === "manual") {
       const n = cfg.candidate_count ?? 2;
-      const cands = cfg.candidates && cfg.candidates.length >= 2 ? cfg.candidates : Array.from({ length: n }, (_, i) => defaultCandidate(i, catalog, cfg.mode));
+      const cands = cfg.candidates && cfg.candidates.length >= 2 ? cfg.candidates : Array.from({ length: n }, (_, i) => defaultCandidate(i, catalog, cfg));
       update({ config_mode: "manual", candidates: cands });
     } else {
       update({ config_mode: "auto", candidates: null });
@@ -851,7 +895,7 @@ export function TeamsTab({ cfg, update, catalog }: Base) {
             <button
               className="add-btn"
               onClick={() => {
-                update({ candidates: [...cands, { ...defaultCandidate(cands.length, catalog, cfg.mode), color: TEAM_COLORS[cands.length % TEAM_COLORS.length] }] });
+                update({ candidates: [...cands, { ...defaultCandidate(cands.length, catalog, cfg), color: TEAM_COLORS[cands.length % TEAM_COLORS.length] }] });
                 setOpen(cands.length);
               }}
             >
@@ -883,18 +927,20 @@ function RealPassword() {
   );
 }
 
-function NeuraLakeKey({ onChange }: { onChange: () => void }) {
+function ProviderKey({ provider, catalog, onChange }: { provider: RealProvider; catalog: CatalogResponse; onChange: () => void }) {
+  const info = catalog.providers?.[provider];
   const [value, setValue] = useState("");
-  const [saved, setSaved] = useState(() => neuralakeKey.get());
+  const [saved, setSaved] = useState(() => providerKeys.get(provider));
+  const onServer = info?.enabled === true;
   const mask = (k: string) => (k.length > 10 ? `${k.slice(0, 4)}••••••${k.slice(-4)}` : "••••••");
   const save = () => {
-    neuralakeKey.set(value.trim());
+    providerKeys.set(provider, value.trim());
     setSaved(value.trim());
     setValue("");
     onChange();
   };
   const remove = () => {
-    neuralakeKey.set("");
+    providerKeys.set(provider, "");
     setSaved("");
     onChange();
   };
@@ -902,8 +948,8 @@ function NeuraLakeKey({ onChange }: { onChange: () => void }) {
     <div className="nl-key">
       <div className="nl-key-head">
         <Icon name="zap" />
-        <strong>Sua chave da NeuraLake</strong>
-        {saved ? <span className="badge ok">Conectada</span> : <span className="badge info">Não conectada</span>}
+        <strong>{info?.label ?? provider}</strong>
+        {saved ? <span className="badge ok">Conectada</span> : onServer ? <span className="badge ok">Chave no servidor</span> : <span className="badge info">Não conectada</span>}
       </div>
       {saved ? (
         <div className="row">
@@ -914,15 +960,28 @@ function NeuraLakeKey({ onChange }: { onChange: () => void }) {
         </div>
       ) : (
         <div className="row">
-          <input type="password" autoComplete="off" value={value} placeholder="Cole aqui a chave (começa com nlk-)" onChange={(e) => setValue(e.target.value)} style={{ maxWidth: 360 }} />
+          <input type="password" autoComplete="off" value={value} placeholder={`Cole aqui a chave${info?.key_hint ? ` (${info.key_hint})` : ""}`} onChange={(e) => setValue(e.target.value)} style={{ minWidth: 0, flex: 1 }} />
           <button className="primary" onClick={save} disabled={!value.trim()}>
             Conectar
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProviderKeys({ catalog, onChange }: { catalog: CatalogResponse; onChange: () => void }) {
+  return (
+    <div className="field" style={{ marginTop: 14, marginBottom: 0 }}>
+      <label>Chaves das IAs</label>
+      <div className="key-grid">
+        {REAL_PROVIDERS.map((p) => (
+          <ProviderKey key={p} provider={p} catalog={catalog} onChange={onChange} />
+        ))}
+      </div>
       <div className="hint">
-        Fica guardada só neste navegador. O servidor usa a chave apenas durante cada arena e não salva em lugar nenhum. Quem abrir o link em outro computador não tem acesso a
-        ela.
+        Conecte só as que você tem; cada equipe e cada juiz pode usar uma IA diferente. As chaves ficam guardadas só neste navegador. O servidor usa cada chave apenas durante a
+        arena e não salva em lugar nenhum. Quem abrir o link em outro computador não tem acesso a elas.
       </div>
     </div>
   );
@@ -930,23 +989,30 @@ function NeuraLakeKey({ onChange }: { onChange: () => void }) {
 
 export function BudgetTab({ cfg, update, catalog }: Base) {
   const [, setKeyVersion] = useState(0);
-  const realAvailable = realEnabled(catalog);
-  const ownKey = Boolean(neuralakeKey.get());
+  const enabled = enabledRealProviders(catalog);
+  const realAvailable = enabled.length > 0;
+  const label = (p: string) => catalog.providers?.[p]?.label ?? p;
+  // Senha so e necessaria quando alguma IA usada roda com a chave do servidor (e nao a do navegador).
+  const needsPassword = REAL_PROVIDERS.some((p) => catalog.providers?.[p]?.enabled && catalog.providers?.[p]?.requires_password && !providerKeys.get(p));
   const updateBudget = (patch: Partial<ChallengeConfig["budget"]>) => update({ budget: { ...cfg.budget, ...patch } });
 
-  function switchMode(mode: "mock" | "real") {
-    const provider = mode === "mock" ? "mock" : "neuralake";
+  // Troca o modo ou a IA padrao: equipes e juizes passam a usar os modelos equivalentes da IA escolhida.
+  function applyProvider(mode: "mock" | "real", realProvider: string) {
+    const provider = mode === "mock" ? "mock" : realProvider;
     const cands = cfg.candidates?.map((c) => {
       const preset = catalog.presets.find((p) => p.preset === c.preset);
       return {
-        ...c, provider: provider as CandidateConfig["provider"], model_option: preset?.model_option_by_provider[provider] ?? (mode === "mock" ? "mock-default" : "auto"),
+        ...c, provider: provider as CandidateConfig["provider"],
+        model_option: preset?.model_option_by_provider[provider] ?? catalog.providers?.[provider]?.default_model ?? "mock-default",
         secondary_model_option: preset?.secondary_by_provider?.[provider] ?? null,
       };
     });
-    // Juizes voltam para o modelo padrao do novo modo (o servidor escolhe o provedor certo).
+    // Juizes voltam para o modelo padrao (o servidor usa a IA padrao escolhida).
     const judges = cfg.judges?.map((j) => ({ ...j, provider: null, model_option: null }));
-    update({ mode, candidates: cands ?? null, judge: null, judges: judges ?? null, mock_scenario: "default" });
+    update({ mode, real_provider: realProvider as ChallengeConfig["real_provider"], candidates: cands ?? null, judge: null, judges: judges ?? null, mock_scenario: "default" });
   }
+  const pickReal = () => (enabled.includes(cfg.real_provider as RealProvider) ? cfg.real_provider : (enabled[0] ?? cfg.real_provider));
+  const switchMode = (mode: "mock" | "real") => applyProvider(mode, mode === "real" ? pickReal() : cfg.real_provider);
 
   return (
     <div className="stack">
@@ -956,20 +1022,35 @@ export function BudgetTab({ cfg, update, catalog }: Base) {
           value={cfg.mode as "mock" | "real"}
           options={[
             { value: "mock", label: "Simulado (grátis)" },
-            { value: "real", label: "Real · NeuraLake", disabled: !realAvailable },
+            { value: "real", label: "Real (gasta créditos)", disabled: !realAvailable },
           ]}
           onChange={switchMode}
         />
         <p className="hint" style={{ marginBottom: 0 }}>
-          {realAvailable ? "O modo real usa a IA da NeuraLake e gasta créditos." : "Para liberar o modo real, conecte a sua chave da NeuraLake logo abaixo."}
+          {realAvailable ? `O modo real usa as IAs conectadas (${enabled.map(label).join(", ")}) e gasta créditos.` : "Para liberar o modo real, conecte a chave de pelo menos uma IA logo abaixo."}
         </p>
-        <NeuraLakeKey
+        {cfg.mode === "real" && realAvailable && (
+          <div className="field" style={{ marginTop: 14, marginBottom: 0, maxWidth: 360 }}>
+            <label>IA padrão (equipes automáticas e juízes)</label>
+            <select value={cfg.real_provider} onChange={(e) => applyProvider("real", e.target.value)}>
+              {!enabled.includes(cfg.real_provider as RealProvider) && <option value={cfg.real_provider}>{label(cfg.real_provider)} (sem chave conectada)</option>}
+              {enabled.map((p) => (
+                <option key={p} value={p}>
+                  {label(p)}
+                </option>
+              ))}
+            </select>
+            <div className="hint">Na aba Equipes (Personalizado) e na aba Juízes você pode trocar a IA de cada um.</div>
+          </div>
+        )}
+        <ProviderKeys
+          catalog={catalog}
           onChange={() => {
             setKeyVersion((v) => v + 1);
             if (cfg.mode === "real" && !realEnabled(catalog)) switchMode("mock");
           }}
         />
-        {realAvailable && !ownKey && catalog.providers?.neuralake?.requires_password && <RealPassword />}
+        {needsPassword && <RealPassword />}
         {cfg.mode === "mock" && (
           <div className="field" style={{ marginTop: 14, marginBottom: 0, maxWidth: 320 }}>
             <label>Cenário simulado</label>

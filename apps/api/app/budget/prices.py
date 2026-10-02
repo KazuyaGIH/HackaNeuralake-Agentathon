@@ -72,6 +72,14 @@ def load_price_table(prices_file: Path | None) -> PriceTable:
     currency = "USD"
     for opt in NEURALAKE_OPTIONS:
         entries[("neuralake", opt)] = None
+    # OpenAI, Gemini e Claude: precos publicos embutidos no registro de provedores.
+    from app.providers.registry import PROVIDERS
+
+    for prov, spec in PROVIDERS.items():
+        if prov == "neuralake":
+            continue
+        for m in spec.models:
+            entries[(str(prov), m.option)] = Price(m.input_per_1m, m.output_per_1m) if m.input_per_1m is not None and m.output_per_1m is not None else None
     if prices_file and Path(prices_file).exists():
         data = json.loads(Path(prices_file).read_text(encoding="utf-8"))
         version = f"mock-prices-v1+{data.get('version', 'neuralake-file')}"

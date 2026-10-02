@@ -18,6 +18,7 @@ from app.config import Settings
 from app.contracts.challenge import EFFICIENCY_CRITERION_ID, CandidateConfig, ChallengeConfig, JudgeConfig
 from app.contracts.common import ConstraintKind, DecisionStatus, ExecutionMode, Provider, RunStatus
 from app.providers.catalog import CATALOG_VERSION, MOCK_SCENARIOS, MODEL_OPTIONS, PRESETS, Catalog
+from app.providers.registry import default_option
 from app.storage.models import Run, Source
 from app.storage.repo import utcnow
 
@@ -50,7 +51,7 @@ def payload_hash(payload: dict[str, Any]) -> str:
 
 
 def resolve_candidates(cfg: ChallengeConfig, catalog: Catalog) -> list[CandidateConfig]:
-    provider = Provider.MOCK if cfg.mode == ExecutionMode.MOCK else Provider.NEURALAKE
+    provider = Provider.MOCK if cfg.mode == ExecutionMode.MOCK else cfg.real_provider
     if cfg.candidates:
         out: list[CandidateConfig] = []
         for i, c in enumerate(cfg.candidates, start=1):
@@ -83,7 +84,7 @@ def resolve_candidates(cfg: ChallengeConfig, catalog: Catalog) -> list[Candidate
 def resolve_judges(cfg: ChallengeConfig) -> list[JudgeConfig]:
     """Painel de juizes resolvido: IDs, rubrica (a do desafio quando ausente) e provedor/opcao padrao do modo."""
     base = cfg.judges or [cfg.judge or JudgeConfig()]
-    mode_provider = Provider.MOCK if cfg.mode == ExecutionMode.MOCK else Provider.NEURALAKE
+    mode_provider = Provider.MOCK if cfg.mode == ExecutionMode.MOCK else cfg.real_provider
     out: list[JudgeConfig] = []
     for i, j in enumerate(base, start=1):
         provider = j.provider or mode_provider
@@ -91,7 +92,7 @@ def resolve_judges(cfg: ChallengeConfig) -> list[JudgeConfig]:
             "judge_id": j.judge_id or f"j{i}",
             "rubric": j.rubric or cfg.rubric,
             "provider": provider,
-            "model_option": j.model_option or ("mock-default" if provider == Provider.MOCK else "reasoning"),
+            "model_option": j.model_option or default_option(provider),
         }))
     ids = [j.judge_id for j in out]
     if len(ids) != len(set(ids)):
@@ -100,7 +101,8 @@ def resolve_judges(cfg: ChallengeConfig) -> list[JudgeConfig]:
 
 
 async def prepare_run(
-    cfg: ChallengeConfig, *, owner_id: str, session: AsyncSession, settings: Settings, catalog: Catalog, prices: PriceTable, client_neuralake_key: bool = False,
+    cfg: ChallengeConfig, *, owner_id: str, session: AsyncSession, settings: Settings, catalog: Catalog, prices: PriceTable,
+    client_providers: frozenset[str] = frozenset(),
 ) -> Prepared:
     warnings: list[str] = []
     candidates = resolve_candidates(cfg, catalog)
@@ -122,8 +124,8 @@ async def prepare_run(
             raise IntakeError(f"{role}: modo mock aceita apenas provider 'mock' (recebido '{provider}')", code="provider_mismatch")
         if cfg.mode == ExecutionMode.REAL and provider == Provider.MOCK:
             raise IntakeError(f"{role}: modo real nao aceita provider 'mock'; use um provedor real habilitado", code="provider_mismatch")
-        # Chave trazida pelo navegador habilita a NeuraLake so para esta execucao.
-        if not catalog.provider_enabled(provider) and not (client_neuralake_key and provider == Provider.NEURALAKE):
+        # Chave trazida pelo navegador habilita o provedor so para esta execucao.
+        if not catalog.provider_enabled(provider) and str(provider) not in client_providers:
             raise IntakeError(
                 f"{role}: provedor '{provider}' indisponivel. {catalog.unavailable.get(str(provider), '')}".strip(),
                 code="provider_unavailable", hint="Configure a credencial no backend (.env) e reinicie; nao ha troca automatica para o modo simulado.",

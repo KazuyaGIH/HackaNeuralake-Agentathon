@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 
 from app import APP_VERSION
-from app.budget.prices import NEURALAKE_OPTIONS, PriceTable
+from app.budget.prices import PriceTable
 from app.config import Settings
 from app.contracts.challenge import (
     JUDGE_PERSONAS,
@@ -19,8 +19,9 @@ from app.contracts.challenge import (
     default_rubric,
     persona_rubric,
 )
-from app.contracts.common import Provider, SpecialistKind
+from app.contracts.common import REAL_PROVIDERS, Provider, SpecialistKind
 from app.contracts.runs import CatalogJudgePersona, CatalogModelOption, CatalogPreset, CatalogResponse
+from app.providers.registry import PROVIDERS, server_key
 
 CATALOG_VERSION = "2026-09-30.1"
 
@@ -54,22 +55,15 @@ MODEL_OPTIONS: list[ModelOptionSpec] = [
     ModelOptionSpec(Provider.MOCK, "mock-cheap", "Simulado econômico", "fixed_model", ("text", "json"), 32000, 4000, True),
     ModelOptionSpec(Provider.MOCK, "mock-reasoning", "Simulado raciocínio", "fixed_model", ("text", "json", "reasoning"), 128000, 8000, True),
 ]
-_NL_LABELS = {
-    "auto": "NeuraLake · automático (escolhe o modelo)",
-    "text": "NeuraLake · texto",
-    "code": "NeuraLake · código",
-    "reasoning": "NeuraLake · raciocínio",
-    "reasoning-pro": "NeuraLake · raciocínio avançado",
-    "multimodal": "NeuraLake · multimodal",
-}
-for _opt in NEURALAKE_OPTIONS:
-    MODEL_OPTIONS.append(
-        ModelOptionSpec(
-            Provider.NEURALAKE, _opt, _NL_LABELS[_opt], "routing_capability",
-            ("text", "json-requested") + (("reasoning",) if "reasoning" in _opt else ()),
-            None, 8000, False,
+for _prov, _spec in PROVIDERS.items():
+    for _m in _spec.models:
+        MODEL_OPTIONS.append(
+            ModelOptionSpec(
+                _prov, _m.option, _m.label, "routing_capability" if _prov == Provider.NEURALAKE else "fixed_model",
+                ("text", "json-requested") + (("reasoning",) if _m.reasoning else ()),
+                None, 8000, False,
+            )
         )
-    )
 
 
 @dataclass(frozen=True)
@@ -127,6 +121,17 @@ PRESETS: list[PresetSpec] = [
     ),
 ]
 
+# Modelos de cada estrategia nos demais provedores reais vem do registro (OpenAI, Gemini, Claude).
+PRESETS = [
+    PresetSpec(
+        p.preset, p.label, p.description, p.instructions,
+        {**p.model_option_by_provider, **{str(prov): s.preset_main[p.preset] for prov, s in PROVIDERS.items() if p.preset in s.preset_main}},
+        p.allowed_specialists, p.max_specialist_tasks, p.color,
+        {**p.secondary_by_provider, **{str(prov): s.preset_secondary[p.preset] for prov, s in PROVIDERS.items() if p.preset in s.preset_secondary}},
+    )
+    for p in PRESETS
+]
+
 SPECIALISTS = [
     {
         "kind": SpecialistKind.DOCUMENT_RESEARCH,
@@ -150,10 +155,13 @@ class Catalog:
     unavailable: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.settings.neuralake_api_key:
-            self.unavailable[Provider.NEURALAKE] = (
-                "Integracao NeuraLake indisponivel: defina AGENTATHON_NEURALAKE_API_KEY no backend."
-            )
+        # Sem chave no servidor o provedor fica "indisponivel no servidor"; o usuario ainda pode trazer a propria chave.
+        for prov in REAL_PROVIDERS:
+            if not server_key(prov, self.settings):
+                self.unavailable[str(prov)] = (
+                    f"{PROVIDERS[prov].label}: conecte a sua chave na aba Orcamento e modo "
+                    f"(ou defina AGENTATHON_{str(prov).upper()}_API_KEY no servidor)."
+                )
 
     def provider_enabled(self, provider: Provider | str) -> bool:
         return str(provider) not in self.unavailable
@@ -186,20 +194,22 @@ class Catalog:
         return CatalogResponse(
             app_version=APP_VERSION,
             catalog_version=CATALOG_VERSION,
-            modes=["mock"] + (["real"] if self.provider_enabled(Provider.NEURALAKE) else []),
+            modes=["mock"] + (["real"] if any(self.provider_enabled(p) for p in REAL_PROVIDERS) else []),
             providers={
                 "mock": {"enabled": True, "label": "Simulado (determinístico, sem rede)", "simulated": True},
-                "neuralake": {
-                    "enabled": self.provider_enabled(Provider.NEURALAKE),
-                    "requires_password": bool(self.settings.real_mode_password),
-                    # Sem chave no servidor, o usuario pode trazer a propria (header X-NeuraLake-Key).
-                    "accepts_client_key": True,
-                    "label": "NeuraLake (OpenAI-compatible)",
-                    "simulated": False,
-                    "unavailable_reason": self.unavailable.get("neuralake"),
-                    "base_url": self.settings.neuralake_base_url,
-                    "notes": "Opcoes sao roteamento/capacidades, nao modelos fixos conhecidos. Precos desconhecidos "
-                             "salvo arquivo de precos configurado; modo estrito exige precos conhecidos.",
+                **{
+                    str(prov): {
+                        "enabled": self.provider_enabled(prov),
+                        "requires_password": bool(self.settings.real_mode_password),
+                        # Sem chave no servidor, o usuario pode trazer a propria (header X-<Provedor>-Key).
+                        "accepts_client_key": True,
+                        "label": spec.label,
+                        "key_hint": spec.key_hint,
+                        "simulated": False,
+                        "unavailable_reason": self.unavailable.get(str(prov)),
+                        "default_model": spec.judge_default,
+                    }
+                    for prov, spec in PROVIDERS.items()
                 },
             },
             model_options=options,

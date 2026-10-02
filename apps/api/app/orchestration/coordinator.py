@@ -436,9 +436,12 @@ def _sanitize(payload: dict[str, Any]) -> dict[str, Any]:
 def make_adapters(settings: Settings, catalog: Catalog) -> dict[str, ProviderAdapter]:
     from app.providers.mock import MockAdapter
 
-    adapters: dict[str, ProviderAdapter] = {Provider.MOCK: MockAdapter()}
-    if catalog.provider_enabled(Provider.NEURALAKE):
-        from app.providers.neuralake import NeuraLakeAdapter
+    from app.contracts.common import REAL_PROVIDERS
+    from app.providers.registry import build_adapter, server_key
 
-        adapters[Provider.NEURALAKE] = NeuraLakeAdapter(api_key=settings.neuralake_api_key or "", base_url=settings.neuralake_base_url, json_mode=settings.neuralake_json_mode)
+    adapters: dict[str, ProviderAdapter] = {Provider.MOCK: MockAdapter()}
+    for prov in REAL_PROVIDERS:
+        key = server_key(prov, settings)
+        if key and catalog.provider_enabled(prov):
+            adapters[prov] = build_adapter(prov, key, settings)
     return adapters

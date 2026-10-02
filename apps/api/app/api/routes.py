@@ -22,7 +22,8 @@ from app.budget.prices import from_nano
 from app.config import REPO_DIR
 from app.contracts.artifacts import Report
 from app.contracts.challenge import ActionPlanSpec, ChallengeConfig, RefinementSpec, TeamFeedback
-from app.contracts.common import TERMINAL_STATUSES, CostQuality, ExecutionMode, RunStatus
+from app.contracts.common import TERMINAL_STATUSES, CostQuality, ExecutionMode, Provider, RunStatus
+from app.providers.registry import KEY_HEADERS
 from app.contracts.runs import (
     BudgetBucketView,
     CallUsageView,
@@ -154,26 +155,29 @@ def _links(request: Request, run_id: str) -> dict[str, str]:
     return {"self": base, "events": f"{base}/events", "events_poll": f"{base}/events/list", "report_json": f"{base}/report?format=json", "report_md": f"{base}/report?format=md", "cancel": f"{base}/cancel"}
 
 
-def _client_neuralake_key(request: Request) -> str | None:
-    """Chave NeuraLake do proprio usuario, enviada pelo navegador. Usada so em memoria, para esta execucao."""
-    key = request.headers.get("x-neuralake-key", "").strip()
-    return key or None
+def _client_keys(request: Request) -> dict[str, str]:
+    """Chaves do proprio usuario (uma por provedor), enviadas pelo navegador. Usadas so em memoria, nesta execucao."""
+    out: dict[str, str] = {}
+    for prov, header in KEY_HEADERS.items():
+        key = request.headers.get(header, "").strip()
+        if key:
+            out[str(prov)] = key
+    return out
 
 
-def _require_real_access(request: Request, cfg: ChallengeConfig) -> None:
-    """Modo real gasta creditos: com senha configurada, toda criacao de execucao real exige X-Agentathon-Key.
-    Quem traz a propria chave NeuraLake gasta os proprios creditos e nao precisa da senha do servidor."""
+def _require_real_access(request: Request, used: set[str], client_keys: dict[str, str]) -> None:
+    """Modo real gasta creditos: com senha configurada, usar uma chave DO SERVIDOR exige X-Agentathon-Key.
+    Quem traz as proprias chaves gasta os proprios creditos e nao precisa da senha."""
     expected = request.app.state.settings.real_mode_password
-    if cfg.mode != ExecutionMode.REAL or not expected or _client_neuralake_key(request):
+    if not expected or not (used - set(client_keys)):
         return
     given = request.headers.get("x-agentathon-key", "")
     if not hmac.compare_digest(given.encode(), expected.encode()):
-        raise _err(401, "real_mode_locked", "o modo real esta protegido por senha", "informe a senha do modo real na aba Orcamento e modo")
+        raise _err(401, "real_mode_locked", "o modo real esta protegido por senha", "conecte a sua propria chave ou informe a senha do modo real na aba Orcamento e modo")
 
 
 async def _create_run(request: Request, session: Session, owner: str, cfg: ChallengeConfig, *, idempotency_key: str | None, parent_run_id: str | None = None) -> tuple[Run, bool, list[str]]:
     st = request.app.state
-    _require_real_access(request, cfg)
     body_hash = payload_hash(cfg.model_dump(mode="json"))
     if idempotency_key:
         existing = (await session.execute(select(IdempotencyKey).where(IdempotencyKey.owner_id == owner, IdempotencyKey.key == idempotency_key))).scalar_one_or_none()
@@ -183,12 +187,18 @@ async def _create_run(request: Request, session: Session, owner: str, cfg: Chall
             run = await get_run(session, existing.run_id)
             assert run is not None
             return run, False, []
-    client_key = _client_neuralake_key(request) if cfg.mode == ExecutionMode.REAL else None
+    client_keys = _client_keys(request) if cfg.mode == ExecutionMode.REAL else {}
     try:
         prepared = await prepare_run(cfg, owner_id=owner, session=session, settings=st.settings, catalog=st.catalog, prices=st.prices,
-                                     client_neuralake_key=client_key is not None)
+                                     client_providers=frozenset(client_keys))
     except IntakeError as exc:
         raise _err(422, exc.code, exc.message, exc.hint) from exc
+    # So os provedores que esta execucao usa (equipes, modelos economicos e juizes).
+    snap = prepared.snapshot
+    used = {str(c.provider) for c in snap.candidates or []} | {str(j.provider) for j in snap.judges or []}
+    used.discard(str(Provider.MOCK))
+    _require_real_access(request, used, client_keys)
+    client_keys = {p: k for p, k in client_keys.items() if p in used}
     run_id = f"run_{uuid.uuid4().hex[:16]}"
     ledger = Ledger(st.prices, strict=prepared.snapshot.budget.strict)
     try:
@@ -210,8 +220,8 @@ async def _create_run(request: Request, session: Session, owner: str, cfg: Chall
         return run, False, []
     # Despacho somente apos commit. A chave do usuario fica so na memoria do executor ate o run comecar.
     if st.executor is not None:
-        if client_key:
-            st.executor.run_keys[run_id] = client_key
+        if client_keys:
+            st.executor.run_keys[run_id] = client_keys
         st.executor.wake()
     return run, True, prepared.warnings
 
