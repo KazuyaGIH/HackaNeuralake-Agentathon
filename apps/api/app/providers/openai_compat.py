@@ -21,6 +21,7 @@ class OpenAICompatAdapter:
     # OpenAI (familia atual) usa max_completion_tokens e rejeita temperature fora do padrao.
     token_param = "max_tokens"
     send_temperature = True
+    reasoning_effort: str | None = None
 
     def __init__(self, api_key: str, base_url: str, *, json_mode: bool = False, client: httpx.AsyncClient | None = None) -> None:
         if not api_key:
@@ -35,7 +36,7 @@ class OpenAICompatAdapter:
 
     @staticmethod
     def build_messages(request: GenerateRequest) -> list[dict[str, str]]:
-        messages = [{"role": "system", "content": request.system}, {"role": "user", "content": request.user}]
+        messages = [{"role": "system", "content": request.system_with_schema()}, {"role": "user", "content": request.user}]
         if request.repair_of is not None:
             messages.append({"role": "assistant", "content": request.repair_of})
             messages.append({
@@ -43,7 +44,8 @@ class OpenAICompatAdapter:
                 "content": (
                     "A resposta anterior nao seguiu o schema exigido"
                     + (f": {request.repair_error}" if request.repair_error else "")
-                    + ". Responda novamente SOMENTE com JSON valido conforme o schema, sem texto adicional."
+                    + ". Responda novamente SOMENTE com o objeto JSON completo e valido conforme o JSON Schema do sistema "
+                    "(mesmos nomes de campos), sem texto adicional."
                 ),
             })
         return messages
@@ -59,6 +61,8 @@ class OpenAICompatAdapter:
             payload["temperature"] = 0.2
         if self.json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
         return payload
 
     async def generate(self, request: GenerateRequest) -> GenerateResult:
@@ -87,7 +91,7 @@ class OpenAICompatAdapter:
         if resp.status_code == 429:
             raise ProviderError("rate_limit", f"{who}: limite de requisicoes (429)", retryable=True, usage_known=True)
         if resp.status_code in (408, 502, 503, 504) or resp.status_code >= 500:
-            raise ProviderError("server_error", f"{who}: erro do servidor ({resp.status_code})", retryable=True, usage_known=False)
+            raise ProviderError("server_error", f"{who}: erro do servidor ({resp.status_code}): {resp.text[:200]}", retryable=True, usage_known=False)
         if resp.status_code >= 400:
             body = resp.text[:500]
             kind = "context_length" if "context" in body.lower() and "length" in body.lower() else "bad_request"
@@ -127,3 +131,5 @@ class GeminiAdapter(OpenAICompatAdapter):
     name = "gemini"
     label = "Gemini"
     key_env = "AGENTATHON_GEMINI_API_KEY"
+    # O "pensamento" do Gemini consome o limite de saida e cortava o JSON no meio; "low" e aceito por 2.5 e 3.x.
+    reasoning_effort = "low"

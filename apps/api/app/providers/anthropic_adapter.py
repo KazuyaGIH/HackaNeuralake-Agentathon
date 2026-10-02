@@ -50,7 +50,7 @@ class AnthropicAdapter:
         params: dict[str, Any] = {
             "model": request.option,
             "max_tokens": request.max_output_tokens,
-            "system": request.system,
+            "system": request.system_with_schema(),
             "messages": self.build_messages(request),
         }
         if request.option.startswith(_EFFORT_MODELS):

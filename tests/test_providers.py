@@ -24,6 +24,19 @@ def test_openai_and_gemini_payloads() -> None:
     assert o["max_completion_tokens"] == 900 and "max_tokens" not in o and "temperature" not in o
     g = GeminiAdapter(api_key="k", base_url="https://generativelanguage.googleapis.com/v1beta/openai").build_payload(_req(option="gemini-3.8-flash"))
     assert g["max_tokens"] == 900 and g["temperature"] == 0.2 and g["messages"][0]["role"] == "system"
+    assert g["reasoning_effort"] == "low" and "reasoning_effort" not in o
+
+
+def test_real_models_receive_the_json_schema() -> None:
+    # Sem o schema no prompt, os modelos reais inventavam os nomes dos campos (proposta rejeitada).
+    from app.contracts.artifacts import Proposal
+
+    req = _req(json_schema=Proposal.model_json_schema())
+    system = OpenAIAdapter(api_key="k", base_url="https://x").build_payload(req)["messages"][0]["content"]
+    assert system.startswith("sys") and '"recommendation"' in system and "FORMATO OBRIGATORIO" in system
+    assert '"title":"Proposal"' not in system  # titulos do Pydantic removidos; o campo "title" continua
+    assert '"title":{' in system
+    assert req.prompt_chars() > len("sys") + len("user") + len(req.schema_text())
 
 
 class _FakeMessages:
@@ -55,7 +68,7 @@ async def test_anthropic_adapter_params_and_response() -> None:
     fake = _FakeAnthropic(_msg())
     out = await AnthropicAdapter(api_key="k", client=fake).generate(_req(option="claude-opus-5-5", repair_of="{ruim", repair_error="faltou campo"))
     p = fake.messages.params
-    assert p["system"] == "sys" and p["max_tokens"] == 900 and p["output_config"] == {"effort": "low"}
+    assert p["system"] == "sys" and p["max_tokens"] == 900  # sem schema no pedido, o sistema fica igual and p["output_config"] == {"effort": "low"}
     assert [m["role"] for m in p["messages"]] == ["user", "assistant", "user"] and "thinking" not in p
     assert out.content == '{"ok": true}' and out.usage.input_tokens == 120 and out.reported_model == "claude-haiku-4-5"
     # Haiku 4.5 nao recebe effort.

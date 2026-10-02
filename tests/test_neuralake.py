@@ -104,7 +104,10 @@ class FakeNeuraLake:
     def handler(self, request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         self.calls.append(payload)
-        system = payload["messages"][0]["content"]
+        full_system = payload["messages"][0]["content"]
+        # O sistema real termina com o JSON Schema exigido; o servidor falso so precisa do papel.
+        assert "FORMATO OBRIGATORIO" in full_system and "JSON Schema: {" in full_system
+        system = full_system.split("\n\nFORMATO OBRIGATORIO")[0]
         user = payload["messages"][1]["content"]
         ev_ids = list(dict.fromkeys(re.findall(r"\[(ev-[0-9a-f]{6}-\d{3})\]", user)))
         if system == JUDGE_SYSTEM:
