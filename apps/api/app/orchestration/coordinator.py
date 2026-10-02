@@ -25,6 +25,7 @@ from app.storage.models import BudgetBucket, CallUsage, Run
 from app.storage.repo import RunNotifier, append_event, list_buckets, upsert_artifact, utcnow
 
 T = TypeVar("T", bound=BaseModel)
+RATE_LIMIT_WAIT_S = 20.0
 
 
 class CallDenied(Exception):
@@ -300,6 +301,9 @@ class RunContext:
                 await self.emit("call.finished", {"call_id": call_id, "stage": stage, "candidate_id": candidate_id, "attempt": attempt, "status": "error", "error_type": error.error_type, "usage_known": error.usage_known})
                 await self.emit_budget()
                 if error.retryable and attempt < max_attempts and self.remaining_s() > 0:
+                    # Limite por minuto (comum no plano gratis do Gemini): espera um pouco antes de repetir.
+                    if error.error_type == "rate_limit":
+                        await asyncio.sleep(min(RATE_LIMIT_WAIT_S, max(0.0, self.remaining_s() - 5)))
                     continue
                 raise CallFailed(str(error), error.error_type, call_ids)
 

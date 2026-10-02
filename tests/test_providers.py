@@ -91,6 +91,6 @@ async def test_arena_mixing_providers(tmp_path) -> None:  # noqa: ANN001
         calls = detail["artifacts"]["calls"]
         assert {c["provider"] for c in calls if c["candidate_id"] == "c1"} == {"openai"}
         assert {c["provider"] for c in calls if c["candidate_id"] == "c2"} == {"anthropic"}
-        assert {(c["provider"], c["requested_option"]) for c in calls if c["role"] == "judge"} == {("gemini", "gemini-3.1-pro-preview")}
+        assert {(c["provider"], c["requested_option"]) for c in calls if c["role"] == "judge"} == {("gemini", "gemini-2.5-pro")}
         report = (await client.get(f"/api/v1/runs/{run_id}/report")).json()
         assert float(report["cost"]["total"]) > 0 and report["cost"]["quality"] == "estimated"

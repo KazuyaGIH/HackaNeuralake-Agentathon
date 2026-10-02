@@ -66,12 +66,13 @@ PROVIDERS: dict[Provider, ProviderSpec] = {
         Provider.GEMINI, "Gemini", "começa com AIza",
         models=(
             ModelSpec("gemini-3.8-flash", "Gemini · 3.8 Flash", _d("0.75"), _d("3.75")),
-            ModelSpec("gemini-3.1-pro-preview", "Gemini · 3.1 Pro (prévia)", _d("2.00"), _d("12.00"), reasoning=True),
             ModelSpec("gemini-2.5-pro", "Gemini · 2.5 Pro", _d("1.25"), _d("10.00"), reasoning=True),
             ModelSpec("gemini-2.5-flash-lite", "Gemini · 2.5 Flash-Lite (econômico)", _d("0.10"), _d("0.40")),
+            ModelSpec("gemini-3.1-pro-preview", "Gemini · 3.1 Pro (prévia, só plano pago)", _d("2.00"), _d("12.00"), reasoning=True),
         ),
-        judge_default="gemini-3.1-pro-preview",
-        preset_main={"balanced": "gemini-3.8-flash", "cost": "gemini-2.5-flash-lite", "robust": "gemini-3.1-pro-preview", "explorer": "gemini-3.8-flash"},
+        # Padroes so com modelos que tem plano gratis na API do Gemini (consultado em 02/10/2026).
+        judge_default="gemini-2.5-pro",
+        preset_main={"balanced": "gemini-3.8-flash", "cost": "gemini-2.5-flash-lite", "robust": "gemini-2.5-pro", "explorer": "gemini-3.8-flash"},
         preset_secondary={"balanced": "gemini-2.5-flash-lite", "robust": "gemini-2.5-flash-lite", "explorer": "gemini-2.5-flash-lite"},
     ),
     Provider.ANTHROPIC: ProviderSpec(
