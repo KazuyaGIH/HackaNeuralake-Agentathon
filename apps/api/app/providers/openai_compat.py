@@ -123,6 +123,9 @@ class OpenAIAdapter(OpenAICompatAdapter):
     key_env = "AGENTATHON_OPENAI_API_KEY"
     token_param = "max_completion_tokens"
     send_temperature = False
+    # Modelos atuais da OpenAI raciocinam (padrao "medium") e o raciocinio conta no limite de saida: no teste real o
+    # gpt-5-mini gastou os 2000 tokens pensando e devolveu resposta vazia. "low" e aceito por GPT-5 e GPT-6.
+    reasoning_effort = "low"
 
 
 class GeminiAdapter(OpenAICompatAdapter):

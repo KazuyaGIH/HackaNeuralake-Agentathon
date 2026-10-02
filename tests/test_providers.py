@@ -24,7 +24,7 @@ def test_openai_and_gemini_payloads() -> None:
     assert o["max_completion_tokens"] == 900 and "max_tokens" not in o and "temperature" not in o
     g = GeminiAdapter(api_key="k", base_url="https://generativelanguage.googleapis.com/v1beta/openai").build_payload(_req(option="gemini-3.8-flash"))
     assert g["max_tokens"] == 900 and g["temperature"] == 0.2 and g["messages"][0]["role"] == "system"
-    assert g["reasoning_effort"] == "low" and "reasoning_effort" not in o
+    assert g["reasoning_effort"] == "low" and o["reasoning_effort"] == "low"
 
 
 def test_real_models_receive_the_json_schema() -> None:
