@@ -192,6 +192,8 @@ class Catalog:
                 "neuralake": {
                     "enabled": self.provider_enabled(Provider.NEURALAKE),
                     "requires_password": bool(self.settings.real_mode_password),
+                    # Sem chave no servidor, o usuario pode trazer a propria (header X-NeuraLake-Key).
+                    "accepts_client_key": True,
                     "label": "NeuraLake (OpenAI-compatible)",
                     "simulated": False,
                     "unavailable_reason": self.unavailable.get("neuralake"),

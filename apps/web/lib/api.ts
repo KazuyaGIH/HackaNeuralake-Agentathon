@@ -11,7 +11,7 @@ export type JudgePersona = components["schemas"]["CatalogJudgePersona"];
 export type CatalogResponse = Omit<components["schemas"]["CatalogResponse"], "limits" | "specialists" | "providers"> & {
   limits: Record<string, Record<string, number>>;
   specialists: { kind: string; label: string; description: string; uses_inference: boolean }[];
-  providers: Record<string, { enabled: boolean; label: string; simulated: boolean; unavailable_reason?: string | null; notes?: string; base_url?: string; requires_password?: boolean }>;
+  providers: Record<string, { enabled: boolean; label: string; simulated: boolean; unavailable_reason?: string | null; notes?: string; base_url?: string; requires_password?: boolean; accepts_client_key?: boolean }>;
 };
 export type RunDetail = components["schemas"]["RunDetail"];
 export type RunSummary = components["schemas"]["RunSummary"];
@@ -118,7 +118,21 @@ export const realKey = {
   get: (): string => (typeof window === "undefined" ? "" : (window.localStorage.getItem(REAL_KEY) ?? "")),
   set: (v: string) => (v ? window.localStorage.setItem(REAL_KEY, v) : window.localStorage.removeItem(REAL_KEY)),
 };
-const keyHeader = (): Record<string, string> => (realKey.get() ? { "X-Agentathon-Key": realKey.get() } : {});
+// Chave NeuraLake do proprio usuario: fica so neste navegador; o servidor usa em memoria so durante a arena.
+const NL_KEY = "agentathon:neuralake-key";
+export const neuralakeKey = {
+  get: (): string => (typeof window === "undefined" ? "" : (window.localStorage.getItem(NL_KEY) ?? "")),
+  set: (v: string) => (v ? window.localStorage.setItem(NL_KEY, v) : window.localStorage.removeItem(NL_KEY)),
+};
+const keyHeader = (): Record<string, string> => ({
+  ...(realKey.get() ? { "X-Agentathon-Key": realKey.get() } : {}),
+  ...(neuralakeKey.get() ? { "X-NeuraLake-Key": neuralakeKey.get() } : {}),
+});
+
+// NeuraLake disponivel: chave no servidor OU chave do usuario neste navegador.
+export function realEnabled(catalog: CatalogResponse | null): boolean {
+  return catalog?.providers?.neuralake?.enabled === true || Boolean(neuralakeKey.get());
+}
 
 export const api = {
   catalog: () => call(`${API_BASE}/api/v1/catalog`).then((r) => handle<CatalogResponse>(r)),

@@ -99,7 +99,9 @@ def resolve_judges(cfg: ChallengeConfig) -> list[JudgeConfig]:
     return out
 
 
-async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSession, settings: Settings, catalog: Catalog, prices: PriceTable) -> Prepared:
+async def prepare_run(
+    cfg: ChallengeConfig, *, owner_id: str, session: AsyncSession, settings: Settings, catalog: Catalog, prices: PriceTable, client_neuralake_key: bool = False,
+) -> Prepared:
     warnings: list[str] = []
     candidates = resolve_candidates(cfg, catalog)
     ids = [c.candidate_id for c in candidates]
@@ -120,7 +122,8 @@ async def prepare_run(cfg: ChallengeConfig, *, owner_id: str, session: AsyncSess
             raise IntakeError(f"{role}: modo mock aceita apenas provider 'mock' (recebido '{provider}')", code="provider_mismatch")
         if cfg.mode == ExecutionMode.REAL and provider == Provider.MOCK:
             raise IntakeError(f"{role}: modo real nao aceita provider 'mock'; use um provedor real habilitado", code="provider_mismatch")
-        if not catalog.provider_enabled(provider):
+        # Chave trazida pelo navegador habilita a NeuraLake so para esta execucao.
+        if not catalog.provider_enabled(provider) and not (client_neuralake_key and provider == Provider.NEURALAKE):
             raise IntakeError(
                 f"{role}: provedor '{provider}' indisponivel. {catalog.unavailable.get(str(provider), '')}".strip(),
                 code="provider_unavailable", hint="Configure a credencial no backend (.env) e reinicie; nao ha troca automatica para o modo simulado.",

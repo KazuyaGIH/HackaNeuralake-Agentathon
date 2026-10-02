@@ -38,6 +38,10 @@ code { font-family: Consolas, "Courier New", monospace; font-size: 0.9em; backgr
 .topbar nav { display: flex; gap: 4px; }
 .topbar nav a { color: var(--ink-2); padding: 6px 12px; border-radius: 8px; font-weight: 500; }
 .topbar nav a:hover { background: var(--line-2); text-decoration: none; }
+.nl-key { margin-top: 14px; padding: 14px; border-radius: 10px; border: 1px solid var(--line); background: #fafbfd; display: flex; flex-direction: column; gap: 10px; }
+.nl-key-head { display: flex; align-items: center; gap: 8px; }
+.nl-key-head .icon { color: var(--accent); }
+.nl-key .hint { margin: 0; }
 .real-password { margin-top: 14px; margin-bottom: 0; padding-top: 14px; border-top: 1px dashed var(--line); }
 .server-wake { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 16px; background: var(--warn-soft); color: var(--warn); font-size: 13px; border-bottom: 1px solid #fde68a; }
 .server-wake .spinner { border-top-color: var(--warn); }

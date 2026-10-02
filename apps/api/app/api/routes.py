@@ -154,10 +154,17 @@ def _links(request: Request, run_id: str) -> dict[str, str]:
     return {"self": base, "events": f"{base}/events", "events_poll": f"{base}/events/list", "report_json": f"{base}/report?format=json", "report_md": f"{base}/report?format=md", "cancel": f"{base}/cancel"}
 
 
+def _client_neuralake_key(request: Request) -> str | None:
+    """Chave NeuraLake do proprio usuario, enviada pelo navegador. Usada so em memoria, para esta execucao."""
+    key = request.headers.get("x-neuralake-key", "").strip()
+    return key or None
+
+
 def _require_real_access(request: Request, cfg: ChallengeConfig) -> None:
-    """Modo real gasta creditos: com senha configurada, toda criacao de execucao real exige X-Agentathon-Key."""
+    """Modo real gasta creditos: com senha configurada, toda criacao de execucao real exige X-Agentathon-Key.
+    Quem traz a propria chave NeuraLake gasta os proprios creditos e nao precisa da senha do servidor."""
     expected = request.app.state.settings.real_mode_password
-    if cfg.mode != ExecutionMode.REAL or not expected:
+    if cfg.mode != ExecutionMode.REAL or not expected or _client_neuralake_key(request):
         return
     given = request.headers.get("x-agentathon-key", "")
     if not hmac.compare_digest(given.encode(), expected.encode()):
@@ -176,8 +183,10 @@ async def _create_run(request: Request, session: Session, owner: str, cfg: Chall
             run = await get_run(session, existing.run_id)
             assert run is not None
             return run, False, []
+    client_key = _client_neuralake_key(request) if cfg.mode == ExecutionMode.REAL else None
     try:
-        prepared = await prepare_run(cfg, owner_id=owner, session=session, settings=st.settings, catalog=st.catalog, prices=st.prices)
+        prepared = await prepare_run(cfg, owner_id=owner, session=session, settings=st.settings, catalog=st.catalog, prices=st.prices,
+                                     client_neuralake_key=client_key is not None)
     except IntakeError as exc:
         raise _err(422, exc.code, exc.message, exc.hint) from exc
     run_id = f"run_{uuid.uuid4().hex[:16]}"
@@ -199,8 +208,10 @@ async def _create_run(request: Request, session: Session, owner: str, cfg: Chall
         run = await get_run(session, existing.run_id)
         assert run is not None
         return run, False, []
-    # Despacho somente apos commit.
+    # Despacho somente apos commit. A chave do usuario fica so na memoria do executor ate o run comecar.
     if st.executor is not None:
+        if client_key:
+            st.executor.run_keys[run_id] = client_key
         st.executor.wake()
     return run, True, prepared.warnings
 

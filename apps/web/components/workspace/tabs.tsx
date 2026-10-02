@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { realKey, type CandidateConfig, type CatalogResponse, type ChallengeConfig, type Constraint, type JudgeConfig, type Rubric, type RunSummary, type SourceCreateResponse } from "@/lib/api";
+import { neuralakeKey, realEnabled, realKey, type CandidateConfig, type CatalogResponse, type ChallengeConfig, type Constraint, type JudgeConfig, type Rubric, type RunSummary, type SourceCreateResponse } from "@/lib/api";
 import { DECISION_LABEL, STATUS_LABEL, ago } from "@/lib/format";
 import { PERSONA_COLOR, judgeFromPersona } from "@/lib/projects";
 import Icon, { type IconName } from "../Icon";
@@ -32,7 +32,7 @@ export function blockers(cfg: ChallengeConfig, catalog: CatalogResponse | null):
   if (!panelOf(cfg).length) out.push("Adicione pelo menos um juiz (aba Juízes).");
   if (panelOf(cfg).some((j) => j.rubric?.criteria.some((c) => c.computed_by === "server_efficiency")) && !cfg.budget.total_cap)
     out.push("O critério de eficiência exige um teto de gasto (aba Orçamento).");
-  if (cfg.mode === "real" && catalog?.providers?.neuralake?.enabled !== true) out.push("O modo real está indisponível: falta a chave da NeuraLake no servidor.");
+  if (cfg.mode === "real" && !realEnabled(catalog)) out.push("O modo real está indisponível: cole a sua chave da NeuraLake na aba Orçamento e modo.");
   return out;
 }
 
@@ -373,7 +373,7 @@ function JudgeCard({ judge, index, open, onToggle, onChange, onRemove, canRemove
   const sum = weightSum(rubric);
   const color = PERSONA_COLOR[judge.persona] ?? PERSONA_COLOR.custom;
   const persona = catalog.judge_personas.find((p) => p.persona === judge.persona);
-  const options = catalog.model_options.filter((m) => m.enabled && (mode === "mock" ? m.provider === "mock" : m.provider !== "mock"));
+  const options = catalog.model_options.filter((m) => (m.enabled || (m.provider === "neuralake" && realEnabled(catalog))) && (mode === "mock" ? m.provider === "mock" : m.provider !== "mock"));
   const setCriteria = (criteria: Rubric["criteria"]) => onChange({ rubric: { ...rubric, criteria } });
   const setCriterion = (i: number, patch: Partial<Rubric["criteria"][number]>) => setCriteria(rubric.criteria.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
@@ -600,7 +600,7 @@ function TeamCard({ c, index, open, onToggle, onChange, onRemove, canRemove, cat
   mode: string;
 }) {
   const color = c.color ?? TEAM_COLORS[index % TEAM_COLORS.length];
-  const options = catalog.model_options.filter((m) => m.enabled && (mode === "mock" ? m.provider === "mock" : m.provider !== "mock"));
+  const options = catalog.model_options.filter((m) => (m.enabled || (m.provider === "neuralake" && realEnabled(catalog))) && (mode === "mock" ? m.provider === "mock" : m.provider !== "mock"));
   const find = (opt: string | null | undefined) => options.find((m) => m.option === opt);
   const ratio = cheaperBy(find(c.model_option), find(c.secondary_model_option));
   const uses = new Set(c.secondary_for ?? []);
@@ -883,8 +883,55 @@ function RealPassword() {
   );
 }
 
+function NeuraLakeKey({ onChange }: { onChange: () => void }) {
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState(() => neuralakeKey.get());
+  const mask = (k: string) => (k.length > 10 ? `${k.slice(0, 4)}••••••${k.slice(-4)}` : "••••••");
+  const save = () => {
+    neuralakeKey.set(value.trim());
+    setSaved(value.trim());
+    setValue("");
+    onChange();
+  };
+  const remove = () => {
+    neuralakeKey.set("");
+    setSaved("");
+    onChange();
+  };
+  return (
+    <div className="nl-key">
+      <div className="nl-key-head">
+        <Icon name="zap" />
+        <strong>Sua chave da NeuraLake</strong>
+        {saved ? <span className="badge ok">Conectada</span> : <span className="badge info">Não conectada</span>}
+      </div>
+      {saved ? (
+        <div className="row">
+          <code>{mask(saved)}</code>
+          <button className="small" onClick={remove}>
+            Remover chave
+          </button>
+        </div>
+      ) : (
+        <div className="row">
+          <input type="password" autoComplete="off" value={value} placeholder="Cole aqui a chave (começa com nlk-)" onChange={(e) => setValue(e.target.value)} style={{ maxWidth: 360 }} />
+          <button className="primary" onClick={save} disabled={!value.trim()}>
+            Conectar
+          </button>
+        </div>
+      )}
+      <div className="hint">
+        Fica guardada só neste navegador. O servidor usa a chave apenas durante cada arena e não salva em lugar nenhum. Quem abrir o link em outro computador não tem acesso a
+        ela.
+      </div>
+    </div>
+  );
+}
+
 export function BudgetTab({ cfg, update, catalog }: Base) {
-  const realAvailable = catalog.providers?.neuralake?.enabled === true;
+  const [, setKeyVersion] = useState(0);
+  const realAvailable = realEnabled(catalog);
+  const ownKey = Boolean(neuralakeKey.get());
   const updateBudget = (patch: Partial<ChallengeConfig["budget"]>) => update({ budget: { ...cfg.budget, ...patch } });
 
   function switchMode(mode: "mock" | "real") {
@@ -914,9 +961,15 @@ export function BudgetTab({ cfg, update, catalog }: Base) {
           onChange={switchMode}
         />
         <p className="hint" style={{ marginBottom: 0 }}>
-          {realAvailable ? "O modo real usa a IA da NeuraLake e gasta créditos." : "Modo real indisponível: falta configurar a chave da NeuraLake no servidor."}
+          {realAvailable ? "O modo real usa a IA da NeuraLake e gasta créditos." : "Para liberar o modo real, conecte a sua chave da NeuraLake logo abaixo."}
         </p>
-        {realAvailable && catalog.providers?.neuralake?.requires_password && <RealPassword />}
+        <NeuraLakeKey
+          onChange={() => {
+            setKeyVersion((v) => v + 1);
+            if (cfg.mode === "real" && !realEnabled(catalog)) switchMode("mock");
+          }}
+        />
+        {realAvailable && !ownKey && catalog.providers?.neuralake?.requires_password && <RealPassword />}
         {cfg.mode === "mock" && (
           <div className="field" style={{ marginTop: 14, marginBottom: 0, maxWidth: 320 }}>
             <label>Cenário simulado</label>

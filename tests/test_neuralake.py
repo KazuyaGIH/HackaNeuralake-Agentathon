@@ -165,6 +165,31 @@ async def test_real_mode_strict_requires_known_prices(tmp_path) -> None:  # noqa
         assert r.status_code == 202 and "indicativo" in r.json()["links"]["warnings"]
 
 
+async def test_client_brings_own_neuralake_key_kept_only_in_memory(tmp_path) -> None:  # noqa: ANN001
+    # Servidor SEM chave e com senha: quem traz a propria chave roda o modo real sem a senha do servidor.
+    settings = make_settings(tmp_path, neuralake_prices_file=PRICES, real_mode_password="s3nha", executor_enabled=False)
+    secret = "nlk-cliente-123"
+    async with app_client(settings) as (app, client):
+        catalog = (await client.get("/api/v1/catalog")).json()
+        assert catalog["providers"]["neuralake"]["enabled"] is False and catalog["providers"]["neuralake"]["accepts_client_key"] is True
+        real = await demo_config(client, mode="real")
+        real["budget"]["total_cap"] = "2.00"
+        assert (await client.post("/api/v1/runs", json=real)).json()["detail"]["code"] in ("provider_unavailable", "real_mode_locked")
+        r = await client.post("/api/v1/runs", json=real, headers={"X-NeuraLake-Key": secret})
+        assert r.status_code == 202, r.text
+        run_id = r.json()["run_id"]
+        detail = await client.get(f"/api/v1/runs/{run_id}")
+        events = await client.get(f"/api/v1/runs/{run_id}/events/list")
+        assert secret not in detail.text and secret not in events.text
+        executor = app.state.executor
+        assert executor.run_keys[run_id] == secret
+        ctx = await executor.build_context(run_id)
+        assert ctx.adapters["neuralake"]._api_key == secret and run_id not in executor.run_keys  # consumida
+        # Simulado nao guarda chave nenhuma.
+        r2 = await client.post("/api/v1/runs", json=await demo_config(client), headers={"X-NeuraLake-Key": secret})
+        assert r2.status_code == 202 and r2.json()["run_id"] not in executor.run_keys
+
+
 async def test_real_mode_password_locks_only_real_runs(tmp_path) -> None:  # noqa: ANN001
     settings = make_settings(tmp_path, neuralake_api_key="k", neuralake_prices_file=PRICES, real_mode_password="s3nha", executor_enabled=False)
     async with app_client(settings) as (_app, client):
