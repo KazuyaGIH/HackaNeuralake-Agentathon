@@ -575,10 +575,12 @@ function ModelChips({ c, catalog }: { c: Pick<CandidateConfig, "provider" | "mod
         <Icon name="star" size={12} /> {main?.label ?? c.model_option}
       </span>
       {second ? (
-        <span className="model-chip second" title={priceTag(second)}>
-          <Icon name="zap" size={12} /> {second.label}
-          {ratio && <strong> · {ratio.toFixed(0)}x mais barato</strong>}
-        </span>
+        <>
+          <span className="model-chip second" title={priceTag(second)}>
+            <Icon name="zap" size={12} /> {second.label}
+          </span>
+          {ratio && <span className="model-chip saving">{ratio.toFixed(0)}x mais barato</span>}
+        </>
       ) : (
         <span className="model-chip none">sem modelo econômico</span>
       )}

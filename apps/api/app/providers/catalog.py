@@ -50,17 +50,17 @@ class ModelOptionSpec:
 
 
 MODEL_OPTIONS: list[ModelOptionSpec] = [
-    ModelOptionSpec(Provider.MOCK, "mock-default", "Mock padrao (SIMULADO)", "fixed_model", ("text", "json"), 128000, 8000, True),
-    ModelOptionSpec(Provider.MOCK, "mock-cheap", "Mock economico (SIMULADO)", "fixed_model", ("text", "json"), 32000, 4000, True),
-    ModelOptionSpec(Provider.MOCK, "mock-reasoning", "Mock raciocinio (SIMULADO)", "fixed_model", ("text", "json", "reasoning"), 128000, 8000, True),
+    ModelOptionSpec(Provider.MOCK, "mock-default", "Simulado padrão", "fixed_model", ("text", "json"), 128000, 8000, True),
+    ModelOptionSpec(Provider.MOCK, "mock-cheap", "Simulado econômico", "fixed_model", ("text", "json"), 32000, 4000, True),
+    ModelOptionSpec(Provider.MOCK, "mock-reasoning", "Simulado raciocínio", "fixed_model", ("text", "json", "reasoning"), 128000, 8000, True),
 ]
 _NL_LABELS = {
-    "auto": "NeuraLake auto (roteamento por capacidade)",
-    "text": "NeuraLake capacidade: text",
-    "code": "NeuraLake capacidade: code",
-    "reasoning": "NeuraLake capacidade: reasoning",
-    "reasoning-pro": "NeuraLake capacidade: reasoning-pro",
-    "multimodal": "NeuraLake capacidade: multimodal",
+    "auto": "NeuraLake · automático (escolhe o modelo)",
+    "text": "NeuraLake · texto",
+    "code": "NeuraLake · código",
+    "reasoning": "NeuraLake · raciocínio",
+    "reasoning-pro": "NeuraLake · raciocínio avançado",
+    "multimodal": "NeuraLake · multimodal",
 }
 for _opt in NEURALAKE_OPTIONS:
     MODEL_OPTIONS.append(
@@ -88,8 +88,8 @@ class PresetSpec:
 
 PRESETS: list[PresetSpec] = [
     PresetSpec(
-        "balanced", "Equilibrio",
-        "Equilibra custo, prazo e qualidade; usa pesquisa e calculo quando ha dados.",
+        "balanced", "Equilíbrio",
+        "Equilibra custo, prazo e qualidade; usa pesquisa e cálculo quando há dados.",
         "Voce e o pensante de uma equipe concorrente. Busque a alternativa com melhor equilibrio entre custo, prazo, "
         "risco e qualidade. Cite evidencias por ID. Declare metricas numericas exigidas pelas restricoes com unidade e "
         "evidencia. Registre hipoteses e lacunas explicitamente.",
@@ -108,7 +108,7 @@ PRESETS: list[PresetSpec] = [
     ),
     PresetSpec(
         "robust", "Robustez",
-        "Prioriza privacidade, resiliencia e qualidade das respostas, aceitando custo maior dentro do teto.",
+        "Prioriza privacidade, resiliência e qualidade das respostas, aceitando custo maior dentro do teto.",
         "Voce e o pensante de uma equipe concorrente focada em robustez. Priorize privacidade, confiabilidade e "
         "qualidade, mantendo-se dentro das restricoes obrigatorias. Explicite riscos residuais, dependencias e "
         "planos de contingencia, sempre com evidencias por ID.",
@@ -117,8 +117,8 @@ PRESETS: list[PresetSpec] = [
         secondary_by_provider={"mock": "mock-cheap", "neuralake": "text"},
     ),
     PresetSpec(
-        "explorer", "Exploracao",
-        "Considera alternativas menos obvias e questiona premissas.",
+        "explorer", "Exploração",
+        "Considera alternativas menos óbvias e questiona premissas.",
         "Voce e o pensante de uma equipe concorrente exploratoria. Questione premissas do desafio, considere ao menos "
         "uma alternativa nao convencional e compare-a com a opcao dominante usando evidencias por ID.",
         {"mock": "mock-default", "neuralake": "reasoning-pro"},
