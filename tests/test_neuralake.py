@@ -163,3 +163,18 @@ async def test_real_mode_strict_requires_known_prices(tmp_path) -> None:  # noqa
         cfg["budget"]["strict"] = False
         r = await client.post("/api/v1/runs", json=cfg)
         assert r.status_code == 202 and "indicativo" in r.json()["links"]["warnings"]
+
+
+async def test_real_mode_password_locks_only_real_runs(tmp_path) -> None:  # noqa: ANN001
+    settings = make_settings(tmp_path, neuralake_api_key="k", neuralake_prices_file=PRICES, real_mode_password="s3nha", executor_enabled=False)
+    async with app_client(settings) as (_app, client):
+        catalog = (await client.get("/api/v1/catalog")).json()
+        assert catalog["providers"]["neuralake"]["requires_password"] is True
+        assert "s3nha" not in json.dumps(catalog)
+        real = await demo_config(client, mode="real")
+        real["budget"]["total_cap"] = "2.00"
+        assert (await client.post("/api/v1/runs", json=real)).status_code == 401
+        assert (await client.post("/api/v1/runs", json=real, headers={"X-Agentathon-Key": "errada"})).json()["detail"]["code"] == "real_mode_locked"
+        assert (await client.post("/api/v1/runs", json=real, headers={"X-Agentathon-Key": "s3nha"})).status_code == 202
+        # Simulado continua aberto, sem senha.
+        assert (await client.post("/api/v1/runs", json=await demo_config(client))).status_code == 202

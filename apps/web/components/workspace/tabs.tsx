@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { type CandidateConfig, type CatalogResponse, type ChallengeConfig, type Constraint, type JudgeConfig, type Rubric, type RunSummary, type SourceCreateResponse } from "@/lib/api";
+import { realKey, type CandidateConfig, type CatalogResponse, type ChallengeConfig, type Constraint, type JudgeConfig, type Rubric, type RunSummary, type SourceCreateResponse } from "@/lib/api";
 import { DECISION_LABEL, STATUS_LABEL, ago } from "@/lib/format";
 import { PERSONA_COLOR, judgeFromPersona } from "@/lib/projects";
 import Icon, { type IconName } from "../Icon";
@@ -866,6 +866,23 @@ export function TeamsTab({ cfg, update, catalog }: Base) {
 
 /* ---------------------------------------------------------------- Orcamento e modo */
 
+function RealPassword() {
+  const [value, setValue] = useState(() => realKey.get());
+  const [saved, setSaved] = useState(Boolean(realKey.get()));
+  return (
+    <div className="field real-password">
+      <label>Senha do modo real</label>
+      <div className="row">
+        <input type="password" value={value} placeholder="A senha que você definiu no servidor" onChange={(e) => (setValue(e.target.value), setSaved(false))} style={{ maxWidth: 320 }} />
+        <button onClick={() => (realKey.set(value.trim()), setSaved(Boolean(value.trim())))} disabled={!value.trim() && !saved}>
+          {saved ? "Salva neste navegador" : "Salvar"}
+        </button>
+      </div>
+      <div className="hint">Protege os seus créditos: sem ela, ninguém roda o modo real pelo link público. Fica guardada só neste navegador.</div>
+    </div>
+  );
+}
+
 export function BudgetTab({ cfg, update, catalog }: Base) {
   const realAvailable = catalog.providers?.neuralake?.enabled === true;
   const updateBudget = (patch: Partial<ChallengeConfig["budget"]>) => update({ budget: { ...cfg.budget, ...patch } });
@@ -899,6 +916,7 @@ export function BudgetTab({ cfg, update, catalog }: Base) {
         <p className="hint" style={{ marginBottom: 0 }}>
           {realAvailable ? "O modo real usa a IA da NeuraLake e gasta créditos." : "Modo real indisponível: falta configurar a chave da NeuraLake no servidor."}
         </p>
+        {realAvailable && catalog.providers?.neuralake?.requires_password && <RealPassword />}
         {cfg.mode === "mock" && (
           <div className="field" style={{ marginTop: 14, marginBottom: 0, maxWidth: 320 }}>
             <label>Cenário simulado</label>

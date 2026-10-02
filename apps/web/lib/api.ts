@@ -11,7 +11,7 @@ export type JudgePersona = components["schemas"]["CatalogJudgePersona"];
 export type CatalogResponse = Omit<components["schemas"]["CatalogResponse"], "limits" | "specialists" | "providers"> & {
   limits: Record<string, Record<string, number>>;
   specialists: { kind: string; label: string; description: string; uses_inference: boolean }[];
-  providers: Record<string, { enabled: boolean; label: string; simulated: boolean; unavailable_reason?: string | null; notes?: string; base_url?: string }>;
+  providers: Record<string, { enabled: boolean; label: string; simulated: boolean; unavailable_reason?: string | null; notes?: string; base_url?: string; requires_password?: boolean }>;
 };
 export type RunDetail = components["schemas"]["RunDetail"];
 export type RunSummary = components["schemas"]["RunSummary"];
@@ -112,6 +112,14 @@ async function handle<T>(res: Response): Promise<T> {
   throw new ApiError(res.status, message, code, hint);
 }
 
+// Senha do modo real (gasta creditos): fica so neste navegador e vai num header proprio nas chamadas que criam execucoes.
+const REAL_KEY = "agentathon:real-key";
+export const realKey = {
+  get: (): string => (typeof window === "undefined" ? "" : (window.localStorage.getItem(REAL_KEY) ?? "")),
+  set: (v: string) => (v ? window.localStorage.setItem(REAL_KEY, v) : window.localStorage.removeItem(REAL_KEY)),
+};
+const keyHeader = (): Record<string, string> => (realKey.get() ? { "X-Agentathon-Key": realKey.get() } : {});
+
 export const api = {
   catalog: () => call(`${API_BASE}/api/v1/catalog`).then((r) => handle<CatalogResponse>(r)),
   demoPrepare: () => call(`${API_BASE}/api/v1/demo/prepare`, { method: "POST" }).then((r) => handle<{ challenge: ChallengeConfig; documents: string[]; note: string }>(r)),
@@ -126,7 +134,7 @@ export const api = {
       handle<SourceCreateResponse>(r),
     ),
   createRun: (cfg: ChallengeConfig, idempotencyKey: string) =>
-    call(`${API_BASE}/api/v1/runs`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(cfg) }).then((r) =>
+    call(`${API_BASE}/api/v1/runs`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, ...keyHeader() }, body: JSON.stringify(cfg) }).then((r) =>
       handle<RunCreateResponse>(r),
     ),
   listRuns: () => call(`${API_BASE}/api/v1/runs`, { cache: "no-store" }).then((r) => handle<RunSummary[]>(r)),
@@ -134,13 +142,13 @@ export const api = {
   events: (id: string, after = 0) => call(`${API_BASE}/api/v1/runs/${id}/events/list?after=${after}`, { cache: "no-store" }).then((r) => handle<RunEventView[]>(r)),
   report: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/report?format=json`, { cache: "no-store" }).then((r) => handle<Report>(r)),
   cancel: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/cancel`, { method: "POST" }).then((r) => handle<{ status: string; changed: boolean }>(r)),
-  retry: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/retry`, { method: "POST" }).then((r) => handle<RunCreateResponse>(r)),
+  retry: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/retry`, { method: "POST", headers: keyHeader() }).then((r) => handle<RunCreateResponse>(r)),
   refine: (id: string, feedback: { candidate_id: string; comment: string }[], generalComment: string) =>
-    call(`${API_BASE}/api/v1/runs/${id}/refine`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feedback, general_comment: generalComment }) }).then((r) =>
+    call(`${API_BASE}/api/v1/runs/${id}/refine`, { method: "POST", headers: { "Content-Type": "application/json", ...keyHeader() }, body: JSON.stringify({ feedback, general_comment: generalComment }) }).then((r) =>
       handle<RunCreateResponse>(r),
     ),
   actionPlan: (id: string, candidateId: string | null, instructions: string) =>
-    call(`${API_BASE}/api/v1/runs/${id}/action-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: candidateId, instructions }) }).then((r) =>
+    call(`${API_BASE}/api/v1/runs/${id}/action-plan`, { method: "POST", headers: { "Content-Type": "application/json", ...keyHeader() }, body: JSON.stringify({ candidate_id: candidateId, instructions }) }).then((r) =>
       handle<RunCreateResponse>(r),
     ),
   deleteRun: (id: string) => call(`${API_BASE}/api/v1/runs/${id}`, { method: "DELETE" }).then((r) => (r.status === 404 ? null : handle<null>(r))),

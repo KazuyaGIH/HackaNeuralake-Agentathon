@@ -191,6 +191,7 @@ class Catalog:
                 "mock": {"enabled": True, "label": "Simulado (determinístico, sem rede)", "simulated": True},
                 "neuralake": {
                     "enabled": self.provider_enabled(Provider.NEURALAKE),
+                    "requires_password": bool(self.settings.real_mode_password),
                     "label": "NeuraLake (OpenAI-compatible)",
                     "simulated": False,
                     "unavailable_reason": self.unavailable.get("neuralake"),

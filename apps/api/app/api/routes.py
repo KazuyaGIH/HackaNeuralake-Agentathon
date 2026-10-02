@@ -1,4 +1,5 @@
 ﻿import hashlib
+import hmac
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -21,7 +22,7 @@ from app.budget.prices import from_nano
 from app.config import REPO_DIR
 from app.contracts.artifacts import Report
 from app.contracts.challenge import ActionPlanSpec, ChallengeConfig, RefinementSpec, TeamFeedback
-from app.contracts.common import TERMINAL_STATUSES, CostQuality, RunStatus
+from app.contracts.common import TERMINAL_STATUSES, CostQuality, ExecutionMode, RunStatus
 from app.contracts.runs import (
     BudgetBucketView,
     CallUsageView,
@@ -153,8 +154,19 @@ def _links(request: Request, run_id: str) -> dict[str, str]:
     return {"self": base, "events": f"{base}/events", "events_poll": f"{base}/events/list", "report_json": f"{base}/report?format=json", "report_md": f"{base}/report?format=md", "cancel": f"{base}/cancel"}
 
 
+def _require_real_access(request: Request, cfg: ChallengeConfig) -> None:
+    """Modo real gasta creditos: com senha configurada, toda criacao de execucao real exige X-Agentathon-Key."""
+    expected = request.app.state.settings.real_mode_password
+    if cfg.mode != ExecutionMode.REAL or not expected:
+        return
+    given = request.headers.get("x-agentathon-key", "")
+    if not hmac.compare_digest(given.encode(), expected.encode()):
+        raise _err(401, "real_mode_locked", "o modo real esta protegido por senha", "informe a senha do modo real na aba Orcamento e modo")
+
+
 async def _create_run(request: Request, session: Session, owner: str, cfg: ChallengeConfig, *, idempotency_key: str | None, parent_run_id: str | None = None) -> tuple[Run, bool, list[str]]:
     st = request.app.state
+    _require_real_access(request, cfg)
     body_hash = payload_hash(cfg.model_dump(mode="json"))
     if idempotency_key:
         existing = (await session.execute(select(IdempotencyKey).where(IdempotencyKey.owner_id == owner, IdempotencyKey.key == idempotency_key))).scalar_one_or_none()

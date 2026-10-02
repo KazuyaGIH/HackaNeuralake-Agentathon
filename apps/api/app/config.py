@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     # NeuraLake (somente backend; nunca enviado ao frontend)
     neuralake_api_key: str | None = None
+    real_mode_password: str | None = Field(
+        default=None, description="Se definida, execucoes no modo real (que gastam creditos) exigem o header X-Agentathon-Key.",
+    )
     neuralake_base_url: str = "https://api.neuralake.cloud/v1"
     neuralake_json_mode: bool = Field(default=False, description="Envia response_format=json_object (compatibilidade nao confirmada).")
     neuralake_prices_file: Path | None = Field(
