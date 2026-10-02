@@ -28,12 +28,9 @@ services:
     startCommand: npx next start -p $PORT
     autoDeploy: true
     envVars:
-      # Endereco do servidor acima (o Render preenche o host; a tela completa com https://).
+      # Endereco PUBLICO do servidor acima (o navegador de quem usa chama a API direto; o host interno do Render nao serve).
       - key: NEXT_PUBLIC_API_BASE_URL
-        fromService:
-          type: web
-          name: agentathon-api
-          property: host
+        value: https://agentathon-api.onrender.com
       - key: NODE_VERSION
         value: "22"
       - key: NEXT_TELEMETRY_DISABLED
