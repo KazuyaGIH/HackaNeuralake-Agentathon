@@ -107,3 +107,23 @@ async def test_arena_mixing_providers(tmp_path) -> None:  # noqa: ANN001
         assert {(c["provider"], c["requested_option"]) for c in calls if c["role"] == "judge"} == {("gemini", "gemini-2.5-pro")}
         report = (await client.get(f"/api/v1/runs/{run_id}/report")).json()
         assert float(report["cost"]["total"]) > 0 and report["cost"]["quality"] == "estimated"
+
+
+def test_extra_fields_are_dropped_instead_of_failing() -> None:
+    # NeuraLake real devolveu "evidence_ids" dentro de uma tarefa do plano: antes o plano inteiro era rejeitado.
+    from pydantic import BaseModel, ConfigDict
+
+    from app.orchestration.coordinator import _parse
+
+    class Task(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        task_id: str
+
+    class Plan(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        tasks: list[Task]
+
+    parsed, err = _parse('{"tasks": [{"task_id": "t1"}, {"task_id": "t2", "evidence_ids": ["ev-1"]}], "extra": 1}', Plan)
+    assert err == "" and parsed is not None and [t.task_id for t in parsed.tasks] == ["t1", "t2"]
+    parsed, err = _parse('{"tasks": [{"evidence_ids": []}]}', Plan)
+    assert parsed is None and "task_id" in err

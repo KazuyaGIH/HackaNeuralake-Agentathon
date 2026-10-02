@@ -26,6 +26,8 @@ from app.storage.repo import RunNotifier, append_event, list_buckets, upsert_art
 
 T = TypeVar("T", bound=BaseModel)
 RETRY_WAIT_S = {"rate_limit": 20.0, "server_error": 5.0}
+# O juiz le todas as propostas e costuma usar modelo de raciocinio (lento): mais tempo, ainda limitado pelo prazo da arena.
+STAGE_TIMEOUT_FACTOR = {"judge": 3}
 
 
 class CallDenied(Exception):
@@ -259,7 +261,7 @@ class RunContext:
             req = GenerateRequest(
                 role=role, stage=stage, candidate_id=candidate_id, option=option, system=system, user=user,
                 schema_name=_schema_name(schema), json_schema=json_schema, max_output_tokens=max_output_tokens,
-                timeout_s=min(self.snapshot.budget.call_timeout_s, max(1.0, self.remaining_s())), seed=self.seed,
+                timeout_s=min(self.snapshot.budget.call_timeout_s * STAGE_TIMEOUT_FACTOR.get(stage, 1), max(1.0, self.remaining_s())), seed=self.seed,
                 attempt=attempt, repair_of=repair_of, repair_error=repair_error, metadata=metadata,
             )
             try:
@@ -411,7 +413,27 @@ def _parse(content: str, schema: type[T]) -> tuple[T | None, str]:
     try:
         return schema.model_validate(data), ""
     except ValidationError as exc:
-        return None, "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:6])
+        errors = exc.errors()
+        # So campos a mais (ex.: evidence_ids dentro de uma tarefa): descarta-os em vez de perder a resposta inteira.
+        if all(e["type"] == "extra_forbidden" for e in errors):
+            for e in errors:
+                _drop_path(data, list(e["loc"]))
+            try:
+                return schema.model_validate(data), ""
+            except ValidationError as exc2:
+                errors = exc2.errors()
+        return None, "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in errors[:6])
+
+
+def _drop_path(data: Any, loc: list[Any]) -> None:
+    node = data
+    for key in loc[:-1]:
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            return
+    if isinstance(node, dict):
+        node.pop(loc[-1], None)
 
 
 def _bucket_view(b: BudgetBucket) -> dict[str, Any]:

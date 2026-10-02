@@ -1,4 +1,4 @@
-﻿"""Fases do fluxo. Regras, limites e validacoes ficam aqui e no coordenador, nunca nos modelos."""
+"""Fases do fluxo. Regras, limites e validacoes ficam aqui e no coordenador, nunca nos modelos."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.agents import prompts as P
 from app.budget.ledger import candidate_bucket
-from app.budget.prices import from_nano
+from app.budget.prices import NEURALAKE_OPTIONS, from_nano
 from app.contracts.artifacts import (
     CostBreakdown,
     Critique,
@@ -348,9 +348,10 @@ async def _round_affordable(ctx: RunContext, cids: list[str]) -> bool:
             continue
         committed = Decimal(b["spent"]) + Decimal(b["reserved"]) + Decimal(b["pending_unknown"]) + Decimal(b["provisioned"])
         try:
-            # Rodada = uma critica (modelo da critica) + uma revisao (modelo principal).
-            crit = ctx.ledger.plan(str(cand.provider), critique_model(cand)[1], 12000, cand.max_output_tokens, []).amount_nano
-            est = ctx.ledger.plan(str(cand.provider), cand.model_option, 12000, cand.max_output_tokens, []).amount_nano
+            # Rodada = uma critica (modelo da critica) + uma revisao (modelo principal). uto (preco desconhecido)
+            # usa o teto dos modelos NeuraLake, como nas chamadas; antes a rodada era sempre desabilitada.
+            crit = ctx.ledger.plan(str(cand.provider), critique_model(cand)[1], 12000, cand.max_output_tokens, NEURALAKE_OPTIONS).amount_nano
+            est = ctx.ledger.plan(str(cand.provider), cand.model_option, 12000, cand.max_output_tokens, NEURALAKE_OPTIONS).amount_nano
         except Exception:  # noqa: BLE001
             return False
         if committed + (from_nano(est) or Decimal("0")) + (from_nano(crit) or Decimal("0")) > cap:

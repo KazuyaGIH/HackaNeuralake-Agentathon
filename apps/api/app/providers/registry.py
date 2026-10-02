@@ -46,7 +46,8 @@ PROVIDERS: dict[Provider, ProviderSpec] = {
             ModelSpec("reasoning-pro", "NeuraLake · raciocínio avançado", reasoning=True),
             ModelSpec("multimodal", "NeuraLake · multimodal"),
         ),
-        judge_default="reasoning",
+        # Teste real (02/10/2026): "reasoning" deu 504 no gateway da NeuraLake ao julgar 2 propostas; "text" respondeu em ~25s.
+        judge_default="text",
         preset_main={"balanced": "auto", "cost": "text", "robust": "reasoning", "explorer": "reasoning-pro"},
         preset_secondary={"balanced": "text", "robust": "text", "explorer": "text"},
     ),
