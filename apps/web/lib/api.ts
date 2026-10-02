@@ -22,7 +22,9 @@ export type ActionPlan = components["schemas"]["ActionPlan"];
 export type SourceCreateResponse = components["schemas"]["SourceCreateResponse"];
 export type RunCreateResponse = components["schemas"]["RunCreateResponse"];
 
-export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+// Aceita URL completa ou so o host (o Render injeta "agentathon-api.onrender.com").
+const RAW_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000").trim().replace(/\/$/, "");
+export const API_BASE = /^https?:\/\//.test(RAW_BASE) ? RAW_BASE : `https://${RAW_BASE}`;
 
 // Servidor no plano gratuito (Render) "dorme" sem uso: ao acordar, as primeiras chamadas falham por ate ~1 min.
 // Todas as chamadas esperam o /health responder; quem quiser mostrar um aviso assina onServerWaiting.

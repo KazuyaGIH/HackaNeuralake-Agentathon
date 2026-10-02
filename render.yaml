@@ -1,5 +1,5 @@
-# Blueprint do Render para o servidor (API) do Agentathon. A tela (apps/web) vai na Vercel.
-# Plano gratuito: o servico "dorme" apos ~15 min sem uso e o disco nao e persistente (historico some ao reiniciar).
+# Blueprint do Render: servidor (API) e tela (Next.js) do Agentathon, ambos no plano gratuito.
+# O plano gratuito "dorme" apos ~15 min sem uso e o disco nao e persistente (historico some ao reiniciar).
 services:
   - type: web
     name: agentathon-api
@@ -18,3 +18,23 @@ services:
         value: '["*"]'
       - key: AGENTATHON_DATA_DIR
         value: /tmp/agentathon-data
+
+  - type: web
+    name: agentathon
+    runtime: node
+    plan: free
+    rootDir: apps/web
+    buildCommand: npm ci && npm run build
+    startCommand: npx next start -p $PORT
+    autoDeploy: true
+    envVars:
+      # Endereco do servidor acima (o Render preenche o host; a tela completa com https://).
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          type: web
+          name: agentathon-api
+          property: host
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
