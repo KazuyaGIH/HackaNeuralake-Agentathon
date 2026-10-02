@@ -24,6 +24,53 @@ export type RunCreateResponse = components["schemas"]["RunCreateResponse"];
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
+// Servidor no plano gratuito (Render) "dorme" sem uso: ao acordar, as primeiras chamadas falham por ate ~1 min.
+// Todas as chamadas esperam o /health responder; quem quiser mostrar um aviso assina onServerWaiting.
+let readyPromise: Promise<boolean> | null = null;
+let waitingNow = false;
+const waitListeners = new Set<(waiting: boolean) => void>();
+
+function setWaiting(w: boolean) {
+  waitingNow = w;
+  waitListeners.forEach((f) => f(w));
+}
+
+export function onServerWaiting(fn: (waiting: boolean) => void): () => void {
+  waitListeners.add(fn);
+  fn(waitingNow);
+  return () => void waitListeners.delete(fn);
+}
+
+async function waitForServer(maxMs = 150000): Promise<boolean> {
+  const start = Date.now();
+  let first = true;
+  while (Date.now() - start < maxMs) {
+    try {
+      const r = await fetch(API_BASE + "/health", { cache: "no-store" });
+      if (r.ok) {
+        setWaiting(false);
+        return true;
+      }
+    } catch {
+      /* ainda acordando */
+    }
+    if (first) {
+      first = false;
+      setWaiting(true);
+    }
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+  setWaiting(false);
+  return false;
+}
+
+export function serverReady(): Promise<boolean> {
+  if (!readyPromise) readyPromise = waitForServer().then((ok) => ((readyPromise = ok ? readyPromise : null), ok));
+  return readyPromise;
+}
+
+const call: typeof fetch = (input, init) => serverReady().then(() => fetch(input, init));
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -63,37 +110,37 @@ async function handle<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  catalog: () => fetch(`${API_BASE}/api/v1/catalog`).then((r) => handle<CatalogResponse>(r)),
-  demoPrepare: () => fetch(`${API_BASE}/api/v1/demo/prepare`, { method: "POST" }).then((r) => handle<{ challenge: ChallengeConfig; documents: string[]; note: string }>(r)),
+  catalog: () => call(`${API_BASE}/api/v1/catalog`).then((r) => handle<CatalogResponse>(r)),
+  demoPrepare: () => call(`${API_BASE}/api/v1/demo/prepare`, { method: "POST" }).then((r) => handle<{ challenge: ChallengeConfig; documents: string[]; note: string }>(r)),
   uploadFile: (file: File, title?: string) => {
     const fd = new FormData();
     fd.append("file", file);
     if (title) fd.append("title", title);
-    return fetch(`${API_BASE}/api/v1/sources`, { method: "POST", body: fd }).then((r) => handle<SourceCreateResponse>(r));
+    return call(`${API_BASE}/api/v1/sources`, { method: "POST", body: fd }).then((r) => handle<SourceCreateResponse>(r));
   },
   uploadText: (title: string, text: string) =>
-    fetch(`${API_BASE}/api/v1/sources/text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, text }) }).then((r) =>
+    call(`${API_BASE}/api/v1/sources/text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, text }) }).then((r) =>
       handle<SourceCreateResponse>(r),
     ),
   createRun: (cfg: ChallengeConfig, idempotencyKey: string) =>
-    fetch(`${API_BASE}/api/v1/runs`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(cfg) }).then((r) =>
+    call(`${API_BASE}/api/v1/runs`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(cfg) }).then((r) =>
       handle<RunCreateResponse>(r),
     ),
-  listRuns: () => fetch(`${API_BASE}/api/v1/runs`, { cache: "no-store" }).then((r) => handle<RunSummary[]>(r)),
-  run: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}`, { cache: "no-store" }).then((r) => handle<RunDetail>(r)),
-  events: (id: string, after = 0) => fetch(`${API_BASE}/api/v1/runs/${id}/events/list?after=${after}`, { cache: "no-store" }).then((r) => handle<RunEventView[]>(r)),
-  report: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}/report?format=json`, { cache: "no-store" }).then((r) => handle<Report>(r)),
-  cancel: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}/cancel`, { method: "POST" }).then((r) => handle<{ status: string; changed: boolean }>(r)),
-  retry: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}/retry`, { method: "POST" }).then((r) => handle<RunCreateResponse>(r)),
+  listRuns: () => call(`${API_BASE}/api/v1/runs`, { cache: "no-store" }).then((r) => handle<RunSummary[]>(r)),
+  run: (id: string) => call(`${API_BASE}/api/v1/runs/${id}`, { cache: "no-store" }).then((r) => handle<RunDetail>(r)),
+  events: (id: string, after = 0) => call(`${API_BASE}/api/v1/runs/${id}/events/list?after=${after}`, { cache: "no-store" }).then((r) => handle<RunEventView[]>(r)),
+  report: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/report?format=json`, { cache: "no-store" }).then((r) => handle<Report>(r)),
+  cancel: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/cancel`, { method: "POST" }).then((r) => handle<{ status: string; changed: boolean }>(r)),
+  retry: (id: string) => call(`${API_BASE}/api/v1/runs/${id}/retry`, { method: "POST" }).then((r) => handle<RunCreateResponse>(r)),
   refine: (id: string, feedback: { candidate_id: string; comment: string }[], generalComment: string) =>
-    fetch(`${API_BASE}/api/v1/runs/${id}/refine`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feedback, general_comment: generalComment }) }).then((r) =>
+    call(`${API_BASE}/api/v1/runs/${id}/refine`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feedback, general_comment: generalComment }) }).then((r) =>
       handle<RunCreateResponse>(r),
     ),
   actionPlan: (id: string, candidateId: string | null, instructions: string) =>
-    fetch(`${API_BASE}/api/v1/runs/${id}/action-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: candidateId, instructions }) }).then((r) =>
+    call(`${API_BASE}/api/v1/runs/${id}/action-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: candidateId, instructions }) }).then((r) =>
       handle<RunCreateResponse>(r),
     ),
-  deleteRun: (id: string) => fetch(`${API_BASE}/api/v1/runs/${id}`, { method: "DELETE" }).then((r) => (r.status === 404 ? null : handle<null>(r))),
+  deleteRun: (id: string) => call(`${API_BASE}/api/v1/runs/${id}`, { method: "DELETE" }).then((r) => (r.status === 404 ? null : handle<null>(r))),
   reportUrl: (id: string, format: "json" | "md") => `${API_BASE}/api/v1/runs/${id}/report?format=${format}`,
   eventsUrl: (id: string, after = 0) => `${API_BASE}/api/v1/runs/${id}/events?after=${after}`,
 };

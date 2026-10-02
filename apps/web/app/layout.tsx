@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import ServerWake from "@/components/ServerWake";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/runs">Histórico</Link>
           </nav>
         </header>
+        <ServerWake />
         <main>{children}</main>
       </body>
     </html>

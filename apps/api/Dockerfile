@@ -13,4 +13,5 @@ ENV AGENTATHON_DATA_DIR=/data AGENTATHON_HOST=0.0.0.0 AGENTATHON_PORT=8000
 VOLUME ["/data"]
 EXPOSE 8000
 WORKDIR /srv/apps/api
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# PORT e definido por plataformas como o Render; localmente (Docker Compose) cai no 8000.
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

@@ -1,0 +1,20 @@
+# Blueprint do Render para o servidor (API) do Agentathon. A tela (apps/web) vai na Vercel.
+# Plano gratuito: o servico "dorme" apos ~15 min sem uso e o disco nao e persistente (historico some ao reiniciar).
+services:
+  - type: web
+    name: agentathon-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Demo publica em modo simulado: aceita clientes de fora (atras do proxy do Render) e qualquer origem.
+      # Ao configurar AGENTATHON_NEURALAKE_API_KEY, proteja o acesso (AGENTATHON_AUTH_MODE=token).
+      - key: AGENTATHON_AUTH_LOCAL_TRUST_ANY_CLIENT
+        value: "true"
+      - key: AGENTATHON_CORS_ORIGINS
+        value: '["*"]'
+      - key: AGENTATHON_DATA_DIR
+        value: /tmp/agentathon-data
