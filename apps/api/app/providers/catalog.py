@@ -21,7 +21,7 @@ from app.contracts.challenge import (
 )
 from app.contracts.common import REAL_PROVIDERS, Provider, SpecialistKind
 from app.contracts.runs import CatalogJudgePersona, CatalogModelOption, CatalogPreset, CatalogResponse
-from app.providers.registry import PROVIDERS, server_key
+from app.providers.registry import PROVIDERS, server_key, thinking_headroom
 
 CATALOG_VERSION = "2026-09-30.1"
 
@@ -189,6 +189,7 @@ class Catalog:
                     price_output_per_1m=price.output_per_1m if price else None,
                     price_version=self.prices.version, price_known=price is not None, enabled=enabled,
                     unavailable_reason=self.unavailable.get(str(m.provider)),
+                    thinking_tokens=thinking_headroom(m.provider, m.option),
                 )
             )
         return CatalogResponse(

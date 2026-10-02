@@ -127,3 +127,17 @@ def test_extra_fields_are_dropped_instead_of_failing() -> None:
     assert err == "" and parsed is not None and [t.task_id for t in parsed.tasks] == ["t1", "t2"]
     parsed, err = _parse('{"tasks": [{"evidence_ids": []}]}', Plan)
     assert parsed is None and "task_id" in err
+
+
+def test_thinking_headroom_is_reserved_and_shown(tmp_path) -> None:  # noqa: ANN001
+    # Modelos que pensam ganham espaco extra de saida, e a reserva do teto cobre esse espaco; Claude e mock nao.
+    from app.budget.ledger import Ledger
+    from app.budget.prices import load_price_table
+    from app.providers.registry import thinking_headroom
+
+    assert thinking_headroom("openai", "gpt-5-mini") == 2048 and thinking_headroom("gemini", "gemini-2.5-flash-lite") == 1024
+    assert thinking_headroom("anthropic", "claude-opus-5-5") == 0 and thinking_headroom("mock", "mock-default") == 0
+    assert thinking_headroom("neuralake", "reasoning") == 2048 and thinking_headroom("neuralake", "text") == 0
+    ledger = Ledger(load_price_table(make_settings(tmp_path).neuralake_prices_file), strict=True)
+    assert ledger.plan("openai", "gpt-5-mini", 3500, 2000, []).est_output_tokens == 4048
+    assert ledger.plan("anthropic", "claude-haiku-4-5", 3500, 2000, []).est_output_tokens == 2000

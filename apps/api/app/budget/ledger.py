@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.budget.prices import Price, PriceTable, to_nano
 from app.contracts.common import CostQuality
 from app.providers.base import estimate_tokens
+from app.providers.registry import thinking_headroom
 from app.storage.models import BudgetBucket, CallUsage, Run
 
 COMMON_BUCKET = "common"
@@ -44,6 +45,8 @@ class Ledger:
 
     def plan(self, provider: str, option: str, prompt_chars: int, max_output_tokens: int, allowed_options: list[str]) -> ReservationPlan:
         est_in = estimate_tokens(prompt_chars)
+        # Modelos que pensam recebem espaco extra de saida; a reserva cobre resposta + pensamento.
+        max_output_tokens += thinking_headroom(provider, option)
         price = self.prices.get(provider, option)
         if price is None and option == "auto":
             price = self.prices.max_price(provider, allowed_options)

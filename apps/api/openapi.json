@@ -1741,6 +1741,12 @@
               }
             ],
             "title": "Unavailable Reason"
+          },
+          "thinking_tokens": {
+            "type": "integer",
+            "title": "Thinking Tokens",
+            "description": "Espaco extra automatico de saida para o pensamento do modelo (somado ao limite da resposta).",
+            "default": 0
           }
         },
         "type": "object",
@@ -1758,7 +1764,8 @@
           "price_version",
           "price_known",
           "enabled",
-          "unavailable_reason"
+          "unavailable_reason",
+          "thinking_tokens"
         ],
         "title": "CatalogModelOption"
       },

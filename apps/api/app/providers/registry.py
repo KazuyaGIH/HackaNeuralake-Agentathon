@@ -17,6 +17,9 @@ class ModelSpec:
     input_per_1m: Decimal | None = None
     output_per_1m: Decimal | None = None
     reasoning: bool = False
+    # Espaco extra de saida para o "pensamento" escondido (conta no limite e e cobrado como saida). Somado ao limite
+    # da resposta automaticamente e incluido nas reservas do teto. Claude roda sem pensamento estendido: 0.
+    thinking_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -42,8 +45,8 @@ PROVIDERS: dict[Provider, ProviderSpec] = {
             ModelSpec("auto", "NeuraLake · automático (escolhe o modelo)"),
             ModelSpec("text", "NeuraLake · texto"),
             ModelSpec("code", "NeuraLake · código"),
-            ModelSpec("reasoning", "NeuraLake · raciocínio", reasoning=True),
-            ModelSpec("reasoning-pro", "NeuraLake · raciocínio avançado", reasoning=True),
+            ModelSpec("reasoning", "NeuraLake · raciocínio", reasoning=True, thinking_tokens=2048),
+            ModelSpec("reasoning-pro", "NeuraLake · raciocínio avançado", reasoning=True, thinking_tokens=2048),
             ModelSpec("multimodal", "NeuraLake · multimodal"),
         ),
         # Teste real (02/10/2026): "reasoning" deu 504 no gateway da NeuraLake ao julgar 2 propostas; "text" respondeu em ~25s.
@@ -54,10 +57,10 @@ PROVIDERS: dict[Provider, ProviderSpec] = {
     Provider.OPENAI: ProviderSpec(
         Provider.OPENAI, "OpenAI", "começa com sk-",
         models=(
-            ModelSpec("gpt-6.1-sol", "OpenAI · GPT-6.1 Sol", _d("2.00"), _d("10.00"), reasoning=True),
-            ModelSpec("gpt-6-astra", "OpenAI · GPT-6 Astra (mais forte)", _d("10.00"), _d("50.00"), reasoning=True),
-            ModelSpec("gpt-6-luna", "OpenAI · GPT-6 Luna (econômico)", _d("0.10"), _d("0.50")),
-            ModelSpec("gpt-5-mini", "OpenAI · GPT-5 mini", _d("0.25"), _d("2.00")),
+            ModelSpec("gpt-6.1-sol", "OpenAI · GPT-6.1 Sol", _d("2.00"), _d("10.00"), reasoning=True, thinking_tokens=2048),
+            ModelSpec("gpt-6-astra", "OpenAI · GPT-6 Astra (mais forte)", _d("10.00"), _d("50.00"), reasoning=True, thinking_tokens=2048),
+            ModelSpec("gpt-6-luna", "OpenAI · GPT-6 Luna (econômico)", _d("0.10"), _d("0.50"), thinking_tokens=2048),
+            ModelSpec("gpt-5-mini", "OpenAI · GPT-5 mini", _d("0.25"), _d("2.00"), thinking_tokens=2048),
         ),
         judge_default="gpt-6.1-sol",
         preset_main={"balanced": "gpt-6.1-sol", "cost": "gpt-6-luna", "robust": "gpt-6.1-sol", "explorer": "gpt-6.1-sol"},
@@ -66,10 +69,10 @@ PROVIDERS: dict[Provider, ProviderSpec] = {
     Provider.GEMINI: ProviderSpec(
         Provider.GEMINI, "Gemini", "começa com AIza",
         models=(
-            ModelSpec("gemini-3.8-flash", "Gemini · 3.8 Flash", _d("0.75"), _d("3.75")),
-            ModelSpec("gemini-2.5-pro", "Gemini · 2.5 Pro", _d("1.25"), _d("10.00"), reasoning=True),
-            ModelSpec("gemini-2.5-flash-lite", "Gemini · 2.5 Flash-Lite (econômico)", _d("0.10"), _d("0.40")),
-            ModelSpec("gemini-3.1-pro-preview", "Gemini · 3.1 Pro (prévia, só plano pago)", _d("2.00"), _d("12.00"), reasoning=True),
+            ModelSpec("gemini-3.8-flash", "Gemini · 3.8 Flash", _d("0.75"), _d("3.75"), thinking_tokens=2048),
+            ModelSpec("gemini-2.5-pro", "Gemini · 2.5 Pro", _d("1.25"), _d("10.00"), reasoning=True, thinking_tokens=2048),
+            ModelSpec("gemini-2.5-flash-lite", "Gemini · 2.5 Flash-Lite (econômico)", _d("0.10"), _d("0.40"), thinking_tokens=1024),
+            ModelSpec("gemini-3.1-pro-preview", "Gemini · 3.1 Pro (prévia, só plano pago)", _d("2.00"), _d("12.00"), reasoning=True, thinking_tokens=2048),
         ),
         # Padroes so com modelos que tem plano gratis na API do Gemini (consultado em 02/10/2026).
         judge_default="gemini-2.5-pro",
@@ -88,6 +91,13 @@ PROVIDERS: dict[Provider, ProviderSpec] = {
         preset_secondary={"balanced": "claude-haiku-4-5", "robust": "claude-haiku-4-5", "explorer": "claude-haiku-4-5"},
     ),
 }
+
+
+def thinking_headroom(provider: Provider | str, option: str) -> int:
+    """Tokens extras para o pensamento do modelo (0 para mock, Claude e modelos que nao pensam)."""
+    spec = PROVIDERS.get(Provider(str(provider))) if str(provider) in {str(p) for p in PROVIDERS} else None
+    model = next((m for m in spec.models if m.option == option), None) if spec else None
+    return model.thinking_tokens if model else 0
 
 
 def default_option(provider: Provider | str) -> str:

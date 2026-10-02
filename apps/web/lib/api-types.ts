@@ -711,6 +711,12 @@ export interface components {
             enabled: boolean;
             /** Unavailable Reason */
             unavailable_reason: string | null;
+            /**
+             * Thinking Tokens
+             * @description Espaco extra automatico de saida para o pensamento do modelo (somado ao limite da resposta).
+             * @default 0
+             */
+            thinking_tokens: number;
         };
         /** CatalogPreset */
         CatalogPreset: {

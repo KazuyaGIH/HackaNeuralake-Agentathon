@@ -20,6 +20,7 @@ from app.contracts.challenge import CandidateConfig, ChallengeConfig, JudgeConfi
 from app.contracts.common import CostQuality, Provider, UsageQuality
 from app.providers.base import GenerateRequest, GenerateResult, ProviderAdapter, ProviderError
 from app.providers.catalog import Catalog
+from app.providers.registry import thinking_headroom
 from app.storage.db import Database
 from app.storage.models import BudgetBucket, CallUsage, Run
 from app.storage.repo import RunNotifier, append_event, list_buckets, upsert_artifact, utcnow
@@ -260,7 +261,7 @@ class RunContext:
                 raise CallDenied("cancelamento solicitado", "cancelled")
             req = GenerateRequest(
                 role=role, stage=stage, candidate_id=candidate_id, option=option, system=system, user=user,
-                schema_name=_schema_name(schema), json_schema=json_schema, max_output_tokens=max_output_tokens,
+                schema_name=_schema_name(schema), json_schema=json_schema, max_output_tokens=max_output_tokens + thinking_headroom(provider, option),
                 timeout_s=min(self.snapshot.budget.call_timeout_s * STAGE_TIMEOUT_FACTOR.get(stage, 1), max(1.0, self.remaining_s())), seed=self.seed,
                 attempt=attempt, repair_of=repair_of, repair_error=repair_error, metadata=metadata,
             )
@@ -318,7 +319,7 @@ class RunContext:
             self.reported_models.setdefault(provider, set()).add(result.reported_model or "unknown")
             parsed, schema_error = _parse(result.content, schema)
             if parsed is None and result.finish_reason in ("length", "max_tokens"):
-                schema_error = f"resposta cortada pelo limite de {max_output_tokens} tokens de saida; responda de forma mais curta ({schema_error})"
+                schema_error = f"resposta cortada pelo limite de {req.max_output_tokens} tokens de saida (resposta + pensamento); responda de forma mais curta ({schema_error})"
             if parsed is not None and validator is not None:
                 try:
                     validator(parsed)

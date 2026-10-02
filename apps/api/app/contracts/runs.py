@@ -34,6 +34,7 @@ class CatalogModelOption(ContractModel):
     price_known: bool
     enabled: bool
     unavailable_reason: str | None = None
+    thinking_tokens: int = Field(default=0, description="Espaco extra automatico de saida para o pensamento do modelo (somado ao limite da resposta).")
 
 
 class CatalogPreset(ContractModel):

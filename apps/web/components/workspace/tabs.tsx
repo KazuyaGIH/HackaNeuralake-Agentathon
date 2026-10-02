@@ -574,8 +574,9 @@ type ModelOption = CatalogResponse["model_options"][number];
 
 function priceTag(m: ModelOption | undefined): string {
   if (!m) return "";
-  if (!m.price_known) return "preço desconhecido";
-  return `US$ ${Number(m.price_input_per_1m)} / ${Number(m.price_output_per_1m)} por 1M tokens`;
+  const thinking = m.thinking_tokens ? ` · +${m.thinking_tokens.toLocaleString("pt-BR")} tokens para pensar` : "";
+  if (!m.price_known) return `preço desconhecido${thinking}`;
+  return `US$ ${Number(m.price_input_per_1m)} / ${Number(m.price_output_per_1m)} por 1M tokens${thinking}`;
 }
 
 function cheaperBy(main: ModelOption | undefined, second: ModelOption | undefined): number | null {
@@ -803,6 +804,11 @@ function TeamCard({ c, index, open, onToggle, onChange, onRemove, canRemove, cat
               <div>
                 <label>Tamanho máximo da resposta (tokens)</label>
                 <input type="number" min={200} max={8000} step={100} value={c.max_output_tokens} onChange={(e) => onChange({ max_output_tokens: Number(e.target.value) })} />
+                <div className="hint">
+                  {find(c.model_option)?.thinking_tokens
+                    ? `Este modelo pensa antes de responder: ganha +${find(c.model_option)!.thinking_tokens.toLocaleString("pt-BR")} tokens automáticos para isso, já contados no teto de gasto.`
+                    : "Só a resposta: este modelo não gasta tokens pensando escondido."}
+                </div>
               </div>
               <div>
                 <label>Fatia do orçamento (peso)</label>
