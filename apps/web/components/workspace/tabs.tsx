@@ -947,7 +947,8 @@ function ProviderKey({ provider, catalog, onChange }: { provider: RealProvider; 
   return (
     <div className="nl-key">
       <div className="nl-key-head">
-        <Icon name="zap" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="provider-logo" src={`/logos/${provider}.png`} alt="" width={22} height={22} />
         <strong>{info?.label ?? provider}</strong>
         {saved ? <span className="badge ok">Conectada</span> : onServer ? <span className="badge ok">Chave no servidor</span> : <span className="badge info">Não conectada</span>}
       </div>
