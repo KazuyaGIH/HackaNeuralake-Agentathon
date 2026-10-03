@@ -1,22 +1,56 @@
-# Agentathon — MVP P0
+# Agentathon
+
+**Agentes de IA que competem para propor a melhor solução para um desafio e são avaliados por juízes de IA que
+justificam cada escolha.**
+
+| | |
+|---|---|
+| **Demo pública** | https://agentathon-k5h2.onrender.com |
+| **API** | https://agentathon-api.onrender.com (`/health`, documentação em `/docs`) |
+| Hospedagem | Render, plano gratuito: a primeira abertura pode levar ~1 min (servidor "acordando") e o histórico de arenas não é permanente. |
 
 Plataforma que executa um **hackathon entre equipes de agentes de IA**: recebe um desafio (objetivo, evidências,
 restrições tipadas, rubrica e orçamento), gera propostas concorrentes, permite uma rodada limitada de crítica e
-revisão, executa verificações objetivas, submete as propostas anonimizadas a um Judge com rubrica fixa e calcula o
+revisão, executa verificações objetivas, submete as propostas anonimizadas a um painel de juízes e calcula o
 ranking em código, com trilha de execução e consumo rastreáveis. Entrega apoio à decisão; **não executa** a proposta
-vencedora. A especificação completa está em [`ARCHITECTURE.md`](ARCHITECTURE.md).
+vencedora. A especificação original está em [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+Projeto do hackathon de agentes da **NeuraLake**. Frente principal: **05 — Agent Trust & Verification**; complementares:
+**03 — Agent-to-Agent Economy** e **02 — Agent Marketplace** (catálogo interno de IAs por equipe/juiz). A API permite que
+outro agente use a plataforma sem tela (relacionado à frente 04).
+
+## Funcionalidades
+
+- **Projetos** com barra lateral: criar, renomear, duplicar e excluir projetos; renomear e excluir arenas.
+- **Desafio**: objetivo, contexto, anexos (TXT/MD/PDF textual), restrições obrigatórias tipadas, critérios e pesos.
+- **Equipes** (2–4) em modo automático ou personalizado, com estratégias (Equilíbrio, Custo, Robustez, Exploração),
+  **modelo principal + modelo econômico** opcional por equipe.
+- **Painel de juízes** (até 6): personas Padrão, Técnico, Negócios, UX ou personalizada; rubrica e peso por juiz.
+- **Várias IAs**: NeuraLake (`auto`, `text`, `code`, `reasoning`, `reasoning-pro`, `multimodal`), OpenAI, Gemini e
+  Claude. Cada equipe e cada juiz pode usar uma IA diferente; "IA padrão" escolhida na aba Orçamento e modo.
+- **Arena ao vivo** por eventos reais (SSE), resultado com ranking, notas por critério, propostas, evidências e custo
+  por equipe.
+- **Repescagem**: comentários gerais e/ou por equipe; só as equipes escolhidas revisam, todas são reavaliadas.
+- **Plano de ação** da vencedora (fases, tarefas, KPIs, riscos, orçamento), com versões "Detalhar mais".
+- **Limite automático de tokens**: modelos que pensam antes de responder ganham espaço extra de saída, incluído no teto.
+- **Exportação** JSON/Markdown e **modo simulado** gratuito, sem chaves.
 
 ## Estado honesto do que existe
 
 | Área | Situação |
 |---|---|
-| Fluxo completo ponta a ponta em **modo simulado** (evidências → pensantes → delegação → barreira única de sincronização → propostas → crítica em anel → revisão → verificadores → Judge anônimo → ranking → relatório) | **Pronto e testado** (60 testes automatizados; `scripts/smoke_mock.py`; cliente agente; smoke de UI com Playwright). |
-| API completa (catálogo, fontes, runs, SSE com reconexão, cancelamento, relatório JSON/Markdown, retry, OpenAPI) | **Pronta e testada.** |
+| Fluxo completo ponta a ponta (evidências → pensantes → delegação → barreira única de sincronização → propostas → crítica em anel → revisão → verificadores → juízes anônimos → ranking → relatório) | **Pronto e testado** (77 testes automatizados; `scripts/smoke_mock.py`; cliente agente; smoke de UI com Playwright). |
+| API completa (catálogo, fontes, runs, SSE com reconexão, cancelamento, relatório JSON/Markdown, retry, refine, action-plan, OpenAPI) | **Pronta e testada.** |
 | Controles críticos: reserva atômica de orçamento, limites de chamadas/tempo/tentativas, idempotência, `interrupted` em reinício, cancelamento honesto, autorização por proprietário, isolamento do Judge, sanitização de eventos | **Prontos e testados** (seção "Critérios de aceite" abaixo). |
-| Interface Next.js (configurar, acompanhar por eventos reais, comparar, histórico, exportar) | **Pronta**; validada em build de produção + smoke automatizado no Chromium. |
-| **Adaptador NeuraLake** (OpenAI-compatible, erros tipados, reparação, usage, modelo informado, preços versionados, teto para `auto`) | **Implementado e testado sem rede** (servidor HTTP falso). **Teste real PENDENTE**: não há `AGENTATHON_NEURALAKE_API_KEY` neste ambiente. A demo real só pode ser declarada validada após uma execução real registrada (`scripts/smoke_real.py`). |
-| Docker Compose | Arquivos prontos; **não verificados** (Docker indisponível nesta máquina). |
-| Cross Memory (NeuraLake), segundo provedor, baseline de agente único, ledger de créditos, A2A/MCP | **Não implementados** (P1/futuro, conforme o escopo). |
+| Interface Next.js (projetos, configurar, arena ao vivo, comparar, repescagem, plano de ação, exportar) | **Pronta** e publicada no Render. |
+| **NeuraLake** (OpenAI-compatible, erros tipados, reparação, usage, preços versionados, teto para `auto`) | **Testada com chave real** (02–03/10/2026): arenas completas com ranking e vencedora, ~US$ 0,05 cada. |
+| **OpenAI, Gemini e Claude** (Claude pelo SDK oficial `anthropic`) | **Implementados e testados sem rede** (payloads, respostas, recusa tipada, arena misturando provedores). Ainda não testados com chave real. |
+| Docker Compose | Arquivos prontos; **não verificados** localmente (o deploy no Render usa o `Dockerfile` da API). |
+| Cross Memory (NeuraLake), baseline de agente único, ledger de créditos, protocolo A2A/MCP | **Não implementados** (futuro). |
+
+**Benchmark (03/10/2026):** arena × agente único × agente único com autorrevisão, 54 execuções reais na NeuraLake com
+gabarito e avaliador externo. Resultado, metodologia e dados em
+[`RELATORIO_BENCHMARK_AGENTATHON.md`](RELATORIO_BENCHMARK_AGENTATHON.md).
 
 Tudo que é simulado leva o selo **SIMULADO** (no conteúdo do mock, no relatório, na UI e no Markdown). Custos em modo
 simulado usam uma tabela de preços fictícia (`mock-prices-v1`) e não comprovam a integração real.
@@ -39,7 +73,7 @@ npm ci
 npm run dev        # http://localhost:3000  (NEXT_PUBLIC_API_BASE_URL default http://127.0.0.1:8000)
 ```
 
-Na UI, clique em **Carregar exemplo (SIMULADO)** e depois em **Iniciar arena**. O banco SQLite e os anexos ficam em
+Na UI, clique em **Criar exemplo** (tela de projetos) ou **Usar exemplo** (dentro de um projeto) e depois em **Iniciar arena**. O banco SQLite e os anexos ficam em
 `./data` (configurável por `AGENTATHON_DATA_DIR`). Migrações Alembic rodam automaticamente na inicialização.
 
 ### Cliente agente (jornada sem navegador)
@@ -74,10 +108,19 @@ determinístico (mesma entrada + seed ⇒ mesmos artefatos) e **ancorado nas evi
 declaradas vêm de números presentes nos trechos, por isso o roteiro (crítica aponta violação de restrição na v1 do
 segundo candidato; revisão corrige) emerge das regras e não de respostas gravadas.
 
-## Integração real (NeuraLake) — configurável, teste real pendente
+## Integração real (NeuraLake, OpenAI, Gemini, Claude)
+
+**Chaves pelo próprio site (forma principal):** aba **Orçamento e modo → Chaves das IAs**, um quadro por IA. A chave
+fica só no `localStorage` do navegador e vai ao servidor nos cabeçalhos `X-NeuraLake-Key`, `X-OpenAI-Key`,
+`X-Gemini-Key` e `X-Anthropic-Key`; o servidor a usa apenas em memória durante a arena e não a grava em banco, log ou
+evento. Em outro navegador é preciso colar de novo. Os modelos e preços públicos (consultados em 02/10/2026; estimativa,
+não fatura) estão em `apps/api/app/providers/registry.py`. No Gemini, os padrões usam apenas modelos com plano gratuito.
+
+**Chave no servidor (opcional, uso local):**
 
 1. Copie `.env.example` para `.env` e preencha `AGENTATHON_NEURALAKE_API_KEY` (somente no backend; nunca vai ao
-   frontend, aos modelos, aos logs ou aos eventos).
+   frontend, aos modelos, aos logs ou aos eventos). `AGENTATHON_REAL_MODE_PASSWORD` (opcional) exige senha para criar
+   execuções reais.
 2. Preços: por padrão o backend carrega `fixtures/prices/neuralake.public-2026-09-30.json` (tabela pública consultada em
    30/09/2026, **estimativa, não fatura**; `auto` é reservado pelo teto das rotas). Aponte
    `AGENTATHON_NEURALAKE_PRICES_FILE` para uma tabela própria quando confirmar os preços no ambiente. Sem preço conhecido,
@@ -90,16 +133,19 @@ segundo candidato; revisão corrige) emerge das regras e não de respostas grava
    .venv\Scripts\python.exe scripts/smoke_real.py --confirm-spend --full --cap 0.20   # arena real mínima, relatório em data/
    ```
 Sem credencial, `POST /runs` em modo real devolve `422 provider_unavailable` com instrução acionável e **não troca
-para mock**. Em modo real, `response_format=json_object` fica desativado (`AGENTATHON_NEURALAKE_JSON_MODE=false`) porque a
-compatibilidade não foi confirmada; o backend valida o JSON e permite uma reparação por chamada lógica.
+para mock**. Todas as IAs recebem o JSON Schema esperado de cada papel; o backend valida o JSON, ignora campos extras e
+permite uma reparação por chamada lógica. Limite por minuto (429) ou servidor sobrecarregado: a arena espera e tenta de
+novo, registrando a mensagem de erro.
 
-Itens a confirmar no ambiente real antes de declarar compatibilidade testada: parâmetros aceitos, formato de `usage`,
-campo `model` efetivo, request id, limites de contexto por capacidade e comportamento do roteador `auto`.
+**Teste real NeuraLake (02–03/10/2026):** base `https://api.neuralake.cloud/v1` confirmada; arenas completas com
+ranking e vencedora, ~US$ 0,05 cada. Ajustes feitos a partir desse teste: schema enviado a todas as IAs, campos extras
+ignorados, juiz padrão `text` (o `reasoning` deu 504 no gateway ao julgar duas propostas) com mais tempo de espera,
+crítica cruzada habilitada também com `auto`, pensamento "low" e espaço extra de saída em OpenAI/Gemini.
 
 ## Testes e verificação
 
 ```powershell
-.venv\Scripts\python.exe -m pytest -q                 # 60 testes (unitários, orçamento, fluxo, controles de API, NeuraLake sem rede)
+.venv\Scripts\python.exe -m pytest -q                 # 77 testes (unitários, orçamento, fluxo, controles de API, provedores sem rede)
 cd apps/web; npm run typecheck; npm run build         # tipos gerados + build de produção
 node scripts/ui_smoke.mjs http://127.0.0.1:3000       # smoke de UI (requer playwright + chromium instalados)
 .venv\Scripts\python.exe scripts/smoke_mock.py        # fluxo simulado in-process com saída do relatório
@@ -134,6 +180,13 @@ Regenerar tipos do frontend a partir dos contratos Pydantic: `python -m app.expo
 | Cliente agente completa o exemplo por API | `test_agent_client_completes_journey_without_ui` |
 | Modo real sem credencial ⇒ erro acionável, sem fallback | `test_real_mode_without_credential_is_actionable_error_no_mock_fallback` |
 | Orçamento insuficiente / política comum de cortes | `test_budget_insufficient_rejected_and_tight_budget_degrades_by_common_policy` |
+
+## Deploy (Render)
+
+`render.yaml` define dois serviços no plano gratuito, com deploy automático a cada push na `main`: `agentathon-api`
+(Docker, `apps/api/Dockerfile`, health check `/health`) e `agentathon` (Next.js, `next start`). `NEXT_PUBLIC_API_BASE_URL`
+precisa ser o endereço **público** da API, porque é o navegador de quem usa que chama o servidor. Nenhuma chave de IA fica
+no Render: cada usuário cola a sua no site.
 
 ## Docker Compose (não verificado localmente)
 
@@ -226,7 +279,7 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
 
 ## Roteiro de demonstração (§18)
 
-1. UI → **Carregar exemplo (SIMULADO)** (ou `POST /demo/prepare` pelo cliente agente): empresa fictícia escolhendo a
+1. UI → **Criar exemplo** (ou `POST /demo/prepare` pelo cliente agente): empresa fictícia escolhendo a
    arquitetura de um chatbot interno; restrições `custo_mensal_max ≤ 8000 BRL` e `prazo_piloto_max ≤ 90 dias`.
 2. **Iniciar arena**: pacote de evidências v1 → dois pensantes planejam → especialistas (pesquisa e cálculo tipado) →
    barreira única congela o pacote v2 → propostas v1.
@@ -238,11 +291,12 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
 
 ## Pendências e limitações conhecidas
 
-- **Teste real NeuraLake pendente** (sem credencial). Compatibilidade de parâmetros/usage/`auto` não confirmada. Sem teste por API
+- OpenAI, Gemini e Claude ainda não testados com chave real (somente NeuraLake).
+- Demo pública no plano gratuito do Render: servidor dorme sem uso e o histórico de arenas não é permanente.
 - Docker Compose não executado nesta máquina.
 - Sem OCR; PDFs digitalizados são rejeitados com explicação.
 - UI apenas para uso local (sem sessão autenticada/CSRF); para rede, usar clientes com token.
 - SQLite exige instância única; SSE em produção requer proxy sem buffering.
 - Retomada automática de jobs interrompidos não existe (por desenho): `POST /runs/{id}/retry` cria novo run vinculado.
 - Anonimização do Judge reduz viés, mas um modelo pode se identificar por estilo; não há garantia de imparcialidade.
-- Itens P1 (segundo provedor, baseline de agente único, ledger de créditos, Cross Memory) não iniciados.
+- Itens futuros (baseline de agente único, ledger de créditos, Cross Memory, protocolo A2A/MCP) não iniciados.

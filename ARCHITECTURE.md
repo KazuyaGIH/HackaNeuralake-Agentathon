@@ -1,10 +1,10 @@
 # Agentathon — Arquitetura e especificação do MVP
 
-Versão 1.0 · 30/09/2026 · Documento de produto e implementação para o Devin.
+Versão 1.0 · 30/09/2026 · Especificação original de produto e implementação.
 
-**Status:** arquitetura proposta, ainda não implementada. Requisitos do produto vêm da conversa; tecnologias, limites numéricos e recorte do MVP abaixo são decisões propostas para tornar o desenvolvimento executável. Não apresentar funcionalidades planejadas como entregues.
+**Status (03/10/2026):** MVP **implementado** a partir desta especificação e publicado em https://agentathon-k5h2.onrender.com. O estado atual, as funcionalidades adicionadas depois (projetos, painel de juízes, modelo econômico por equipe, repescagem, plano de ação, NeuraLake/OpenAI/Gemini/Claude com chaves pelo site) e os desvios registrados estão no [`README.md`](README.md). Itens marcados como P1/Futuro abaixo continuam não implementados, exceto o segundo provedor de inferência. As seções 1 e 17 preservam as instruções originais de desenvolvimento.
 
-## 1. Instrução de execução para o Devin
+## 1. Instrução de execução (original, para o agente de desenvolvimento)
 
 Construa o MVP descrito neste documento em incrementos funcionais. Comece inspecionando o repositório e suas instruções; preserve trabalho existente. Se o repositório estiver vazio, use a estrutura da seção 16. Primeiro entregue o fluxo completo em modo simulado; depois conecte inferência real e finalize a interface.
 
