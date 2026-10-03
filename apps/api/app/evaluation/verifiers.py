@@ -116,3 +116,25 @@ def verify_proposal(proposal: Proposal, constraints: list[Constraint], pack: Evi
         candidate_id=proposal.candidate_id, proposal_version=proposal.version, checks=checks,
         valid_evidence_ids=valid, invalid_evidence_ids=invalid, eligibility=elig, reasons=reasons,
     )
+
+
+def revision_regressions(previous: Verification, revised: Verification) -> list[str]:
+    """Regras obrigatorias que a versao anterior comprovou (PASS) e a revisao passou a violar (FAIL).
+    UNKNOWN nao conta: perder a prova deixa a regra pendente, nao a torna violada."""
+    before = {c.constraint_id: c for c in previous.checks if c.mandatory}
+    out: list[str] = []
+    for c in revised.checks:
+        prev = before.get(c.constraint_id)
+        if c.mandatory and prev is not None and prev.result == CheckResult.PASS and c.result == CheckResult.FAIL:
+            out.append(f"regra '{c.constraint_id}' passava na versao {previous.proposal_version} e falha na revisao: {c.reason}")
+    return out
+
+
+def accept_revision(previous: Proposal, revised: Proposal, constraints: list[Constraint], pack: EvidencePack) -> tuple[Proposal, list[str]]:
+    """Decide qual versao segue adiante. A revisao e rejeitada apenas quando introduz violacao comprovada de regra
+    obrigatoria que a original cumpria; nos demais casos (original invalida/pendente, revisao igual ou melhor)
+    a revisao e aceita. Retorna (proposta mantida, motivos da rejeicao)."""
+    regressions = revision_regressions(verify_proposal(previous, constraints, pack), verify_proposal(revised, constraints, pack))
+    if regressions:
+        return previous, regressions
+    return revised, []
