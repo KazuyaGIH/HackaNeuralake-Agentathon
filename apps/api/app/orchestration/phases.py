@@ -36,7 +36,7 @@ from app.contracts.common import CostQuality, DecisionStatus, EvidenceType, RunS
 from app.evaluation.judge import JudgeOutputError, anonymize, judge_criteria, parse_judge_output
 from app.evaluation.ranking import CandidateInput, PanelJudge, compute_ranking
 from app.evaluation.verifiers import accept_revision, verify_proposal
-from app.evidence.calc import CalculationError, MissingInputError, resolve_brief_refs, run_calculation
+from app.evidence.calc import CalculationError, MissingInputError, catalog_text, resolve_brief_refs, run_calculation
 from app.evidence.pack import BRIEF_PROVENANCE, SourceText, brief_items, build_pack, freeze_with_derivations
 from app.evidence.retrieval import retrieve
 from app.orchestration.coordinator import CallDenied, CallFailed, RunContext
@@ -108,6 +108,9 @@ async def phase_evidence(ctx: RunContext) -> None:
 # --------------------------------------------------------------------------- 2. planejamento
 
 
+CALC_INVALID = "calculo invalido"
+
+
 def validate_plan(ctx: RunContext, cid: str, out: ThinkerPlanOutput) -> TaskPlan:
     cand = ctx.candidate(cid)
     allowed = {str(k) for k in cand.allowed_specialists}
@@ -132,6 +135,16 @@ def validate_plan(ctx: RunContext, cid: str, out: ThinkerPlanOutput) -> TaskPlan
         if t.kind == SpecialistKind.CALCULATION and t.calculation is None:
             rejected.append(PlanRejection(task_id=t.task_id, reason="calculo sem especificacao tipada"))
             continue
+        if t.kind == SpecialistKind.CALCULATION and ctx.pack is not None:
+            assert t.calculation is not None
+            spec, _ = resolve_brief_refs(t.calculation, [i for i in ctx.pack.items if i.provenance.startswith(BRIEF_PROVENANCE + ":")])
+            try:  # validacao antes da execucao (mesmas regras de origem); dado ausente segue e vira pendencia
+                run_calculation(spec, ctx.pack.ids(), {i.evidence_id: i for i in ctx.pack.items})
+            except MissingInputError:
+                pass
+            except CalculationError as exc:
+                rejected.append(PlanRejection(task_id=t.task_id, reason=f"{CALC_INVALID}: {exc}"))
+                continue
         if any(d not in {a.task_id for a in accepted} for d in t.depends_on):
             rejected.append(PlanRejection(task_id=t.task_id, reason="dependencia invalida (sem recursao/ordem)"))
             continue
@@ -164,6 +177,22 @@ async def phase_plan(ctx: RunContext) -> None:
                 metadata={**_base_meta(ctx, cid), "secondary_model_option": cand.secondary_model_option},
             )
             plan = validate_plan(ctx, cid, out)
+            bad = [r for r in plan.validation.rejected if r.reason.startswith(CALC_INVALID)]
+            if bad:  # no maximo 1 reparo por plano, com o erro e o catalogo exato; conta no orcamento como qualquer chamada
+                fix = ("\n\nSEU PLANO ANTERIOR TEVE CALCULOS REJEITADOS:\n" + "\n".join(f"- {r.task_id}: {r.reason}" for r in bad)
+                       + f"\nCorrija usando somente estas funcoes e nomes de entrada: {catalog_text()} Cada valor deve aparecer no trecho citado. "
+                       "Se o dado nao existir, remova o calculo. Retorne o plano completo.")
+                try:
+                    out2, ids2 = await ctx.call(
+                        role="thinker", stage="plan_repair", candidate_id=cid, provider=str(cand.provider), option=cand.model_option,
+                        system=P.THINKER_SYSTEM, user=P.plan_user(ctx.snapshot.model_dump(mode="json"), cand.model_dump(mode="json"), pack, allowed, cand.max_specialist_tasks) + fix,
+                        schema=ThinkerPlanOutput, max_output_tokens=min(cand.max_output_tokens, 1500),
+                        metadata={**_base_meta(ctx, cid), "secondary_model_option": cand.secondary_model_option, "plan_errors": [r.model_dump() for r in bad]},
+                    )
+                    plan = validate_plan(ctx, cid, out2)
+                    ctx.operational_changes.append(f"{cand.name}: plano reparado 1x apos {len(bad)} calculo(s) invalido(s)")
+                except (CallDenied, CallFailed) as exc:
+                    ctx.operational_changes.append(f"{cand.name}: reparo do plano indisponivel ({getattr(exc, 'reason', str(exc))})")
         except (CallDenied, CallFailed) as exc:
             reason = getattr(exc, "reason", str(exc))
             plan = TaskPlan(candidate_id=cid, strategy_summary="(planejamento indisponivel)", tasks=[], validation=PlanValidation(accepted_task_ids=[], rejected=[], adjusted=True))

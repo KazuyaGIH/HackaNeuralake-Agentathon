@@ -4,6 +4,8 @@ import hashlib
 import json
 from typing import Any
 
+from app.evidence.calc import catalog_text
+
 PROMPTS_VERSION = "2026-10-01.3"
 
 UNTRUSTED_NOTICE = (
@@ -82,9 +84,8 @@ def plan_user(snapshot: dict[str, Any], candidate: dict[str, Any], pack: dict[st
         "Tipos: 'document_research' (campo query) e 'calculation' (campo calculation com function, inputs tipados "
         "referenciando evidence_ids e unit). Cada valor de entrada deve aparecer no trecho citado; numeros do enunciado, "
         "contexto e restricoes estao no pacote como ev-brief-* e devem ser citados por esse ID. Nao invente valores: "
-        "se um dado nao existe no pacote, nao crie o calculo e registre a lacuna. Funcoes: sum, subtract(a,b), multiply, divide(numerator,denominator), "
-        "percent_of(value,percent), percent_change(old,new), annual_from_monthly(monthly), monthly_from_annual(annual), "
-        "tco(setup,monthly,months), min, max, average, per_unit(total,units). Sem recursao. Se delegar nao se "
+        "se um dado nao existe no pacote, nao crie o calculo e registre a lacuna. Funcoes (use exatamente estes nomes "
+        f"de funcao e de entrada): {catalog_text()} Sem recursao. Se delegar nao se "
         "justificar, retorne tasks vazio. Resuma a estrategia em strategy_summary."
         + (
             f" ECONOMIA DE TOKENS: sua equipe tem um modelo principal ({candidate.get('model_option')}) e um modelo "

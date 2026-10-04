@@ -130,6 +130,22 @@ FUNCTIONS: dict[str, Fn] = {
 
 MAX_ABS = Decimal("1e15")
 
+
+def catalog_text() -> str:
+    """Catalogo exato (derivado de FUNCTIONS/_REQUIRED) para o planejador: funcao e nomes de entrada aceitos."""
+    parts = []
+    for name in FUNCTIONS:
+        req = _REQUIRED.get(name)
+        parts.append(f"{name}({', '.join(req)})" if req else f"{name}(1 a 8 entradas com nomes livres)")
+    return (
+        "; ".join(parts)
+        + ". Cada entrada: {name, value (numero), unit, evidence_ids}; o campo name deve ser EXATAMENTE o nome do parametro "
+        "(nao uma descricao). Exemplo: {\"function\": \"tco\", \"unit\": \"BRL\", \"inputs\": [{\"name\": \"setup\", \"value\": \"40000\", "
+        "\"unit\": \"BRL\", \"evidence_ids\": [\"<id do trecho com 40000>\"]}, {\"name\": \"monthly\", \"value\": \"7200\", \"unit\": \"BRL\", "
+        "\"evidence_ids\": [\"<id do trecho com 7200>\"]}, {\"name\": \"months\", \"value\": \"12\", \"unit\": \"meses\", \"evidence_ids\": "
+        "[\"<id do trecho com 12>\"]}]}. Nenhuma outra funcao existe (sem comparacoes)."
+    )
+
 _NUM = re.compile(r"(?<![\w.,])-?\d[\d.,]*")
 
 
