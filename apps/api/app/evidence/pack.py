@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from app.contracts.artifacts import EvidenceItem, EvidenceLocator, EvidencePack, SourceSummary
+from app.contracts.challenge import Constraint
 from app.contracts.common import EvidenceType
 from app.evidence.extract import EXTRACTOR_VERSION
 
@@ -69,8 +70,31 @@ def _chunks(text: str) -> list[tuple[str, int, int, int | None]]:
     return out
 
 
-def build_pack(sources: list[SourceText]) -> EvidencePack:
+BRIEF_PROVENANCE = "challenge"
+
+
+def brief_items(objective: str, context: str = "", constraints: list[Constraint] | None = None) -> list[EvidenceItem]:
+    """Enunciado, contexto e restricoes do desafio como evidencias citaveis (dados realmente fornecidos pelo cliente)."""
     items: list[EvidenceItem] = []
+    for label, text in (("obj", objective), ("ctx", context)):
+        for idx, (excerpt, l0, l1, _page) in enumerate(_chunks(text or ""), start=1):
+            items.append(EvidenceItem(
+                evidence_id=f"ev-brief-{label}-{idx:03d}", source_id=None, type=EvidenceType.SOURCE_CLAIM, excerpt=excerpt[:4000],
+                locator=EvidenceLocator(section="enunciado" if label == "obj" else "contexto", line_start=l0, line_end=l1),
+                provenance=f"{BRIEF_PROVENANCE}:{'objective' if label == 'obj' else 'context'}",
+            ))
+    for c in constraints or []:
+        limit = f" (limite: {c.limit}{' ' + c.unit if c.unit else ''})" if c.limit is not None else ""
+        items.append(EvidenceItem(
+            evidence_id=f"ev-brief-rst-{c.constraint_id}"[:64], source_id=None, type=EvidenceType.SOURCE_CLAIM,
+            excerpt=f"{c.description}{limit}"[:4000], locator=EvidenceLocator(section=f"restricao:{c.constraint_id}"),
+            provenance=f"{BRIEF_PROVENANCE}:constraint:{c.constraint_id}",
+        ))
+    return items
+
+
+def build_pack(sources: list[SourceText], brief: list[EvidenceItem] | None = None) -> EvidencePack:
+    items: list[EvidenceItem] = list(brief or [])
     summaries: list[SourceSummary] = []
     gaps: list[str] = []
     for src in sources:

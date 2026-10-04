@@ -36,8 +36,8 @@ from app.contracts.common import CostQuality, DecisionStatus, EvidenceType, RunS
 from app.evaluation.judge import JudgeOutputError, anonymize, judge_criteria, parse_judge_output
 from app.evaluation.ranking import CandidateInput, PanelJudge, compute_ranking
 from app.evaluation.verifiers import verify_proposal
-from app.evidence.calc import CalculationError, run_calculation
-from app.evidence.pack import SourceText, build_pack, freeze_with_derivations
+from app.evidence.calc import CalculationError, MissingInputError, run_calculation
+from app.evidence.pack import SourceText, brief_items, build_pack, freeze_with_derivations
 from app.evidence.retrieval import retrieve
 from app.orchestration.coordinator import CallDenied, CallFailed, RunContext
 from app.storage.models import Source
@@ -99,7 +99,8 @@ async def phase_evidence(ctx: RunContext) -> None:
                 ctx.limitations.append(f"fonte {sid} nao encontrada na execucao")
                 continue
             texts.append(SourceText(r.id, r.title, r.media_type, r.extracted_text, r.sha256, r.pages, r.truncated, list(r.warnings or [])))
-    ctx.pack = build_pack(texts)
+    brief = brief_items(ctx.snapshot.objective, ctx.snapshot.context, list(ctx.snapshot.constraints))
+    ctx.pack = build_pack(texts, brief)
     await ctx.save_artifact("evidence_pack", ctx.pack, version=1)
     await ctx.emit("evidence.ready", {"version": 1, "items": len(ctx.pack.items), "sources": len(ctx.pack.sources), "gaps": ctx.pack.gaps})
 
@@ -217,7 +218,9 @@ async def _run_task(ctx: RunContext, cid: str, t: SpecialistTask, known: set[str
     if t.kind == SpecialistKind.CALCULATION:
         assert t.calculation is not None
         try:
-            d = run_calculation(t.calculation, known)
+            d = run_calculation(t.calculation, known, {i.evidence_id: i for i in ctx.pack.items} if ctx.pack else None)
+        except MissingInputError as exc:
+            return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.CALCULATION, status="skipped", error=f"pendencia: {exc}")
         except CalculationError as exc:
             return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.CALCULATION, status="failed", error=str(exc))
         item = EvidenceItem(
@@ -264,6 +267,8 @@ async def phase_sync(ctx: RunContext) -> None:
         for r in results:
             if r.shareable and r.status == "completed":
                 derived.extend(r.derived_evidence)
+            elif r.kind == SpecialistKind.CALCULATION and r.status == "skipped" and r.error:
+                gaps.append(f"{ctx.candidate(cid).name}, calculo {r.task_id}: {r.error}")
     if not ctx.halted:
         ctx.pack = freeze_with_derivations(ctx.pack, derived, gaps)
         await ctx.save_artifact("evidence_pack", ctx.pack, version=ctx.pack.version)

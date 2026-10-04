@@ -80,7 +80,9 @@ def plan_user(snapshot: dict[str, Any], candidate: dict[str, Any], pack: dict[st
         + evidence_block(pack, max_items=30)
         + f"\nPLANEJE ate {max_tasks} tarefas especializadas usando SOMENTE estes tipos permitidos: {allowed}. "
         "Tipos: 'document_research' (campo query) e 'calculation' (campo calculation com function, inputs tipados "
-        "referenciando evidence_ids e unit). Funcoes: sum, subtract(a,b), multiply, divide(numerator,denominator), "
+        "referenciando evidence_ids e unit). Cada valor de entrada deve aparecer no trecho citado; numeros do enunciado, "
+        "contexto e restricoes estao no pacote como ev-brief-* e devem ser citados por esse ID. Nao invente valores: "
+        "se um dado nao existe no pacote, nao crie o calculo e registre a lacuna. Funcoes: sum, subtract(a,b), multiply, divide(numerator,denominator), "
         "percent_of(value,percent), percent_change(old,new), annual_from_monthly(monthly), monthly_from_annual(annual), "
         "tco(setup,monthly,months), min, max, average, per_unit(total,units). Sem recursao. Se delegar nao se "
         "justificar, retorne tasks vazio. Resuma a estrategia em strategy_summary."

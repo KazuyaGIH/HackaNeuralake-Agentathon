@@ -1,21 +1,33 @@
 """Agente de calculo: funcoes numericas pre-definidas com entradas tipadas. Sem eval, shell ou codigo gerado."""
 
+import re
 from collections.abc import Callable
 from decimal import Decimal, DivisionByZero, InvalidOperation
 
-from app.contracts.artifacts import CalcInput, CalculationSpec, Derivation
+from app.contracts.artifacts import CalcInput, CalculationSpec, Derivation, EvidenceItem
 
 Fn = Callable[[dict[str, Decimal]], tuple[Decimal, str]]
 
 
 class CalculationError(ValueError):
-    pass
+    """Entrada invalida: funcao desconhecida, referencia inexistente, valor sem origem ou nao encontrado na origem."""
+
+
+class MissingInputError(CalculationError):
+    """Informacao ausente: a funcao exige uma entrada que nao foi fornecida (vira pendencia, nao erro de calculo)."""
+
+
+_REQUIRED: dict[str, tuple[str, ...]] = {
+    "subtract": ("a", "b"), "divide": ("numerator", "denominator"), "percent_of": ("value", "percent"),
+    "percent_change": ("old", "new"), "annual_from_monthly": ("monthly",), "monthly_from_annual": ("annual",),
+    "tco": ("setup", "monthly", "months"), "per_unit": ("total", "units"),
+}
 
 
 def _need(inputs: dict[str, Decimal], *names: str) -> list[Decimal]:
     missing = [n for n in names if n not in inputs]
     if missing:
-        raise CalculationError(f"entradas obrigatorias ausentes: {', '.join(missing)}")
+        raise MissingInputError(f"entradas obrigatorias ausentes: {', '.join(missing)}")
     return [inputs[n] for n in names]
 
 
@@ -118,8 +130,39 @@ FUNCTIONS: dict[str, Fn] = {
 
 MAX_ABS = Decimal("1e15")
 
+_NUM = re.compile(r"(?<![\w.,])-?\d[\d.,]*")
 
-def run_calculation(spec: CalculationSpec, known_evidence_ids: set[str]) -> Derivation:
+
+def _readings(token: str) -> set[Decimal]:
+    """Leituras possiveis de um numero escrito em pt-BR ou en (ex.: '1.200,50', '1,200.50', '0,5', '12')."""
+    t = token.rstrip(".,")
+    out: set[Decimal] = set()
+    for thousands, dec in ((".", ","), (",", ".")):
+        s = t.replace(thousands, "").replace(dec, ".") if t.count(dec) <= 1 else None
+        if s is None:
+            continue
+        try:
+            out.add(Decimal(s))
+        except InvalidOperation:
+            pass
+    return out
+
+
+def numbers_in(text: str) -> set[Decimal]:
+    out: set[Decimal] = set()
+    for m in _NUM.finditer(text):
+        out |= _readings(m.group(0))
+    return out
+
+
+def _supported_values(item: EvidenceItem) -> set[Decimal]:
+    if item.derivation is not None:
+        return {Decimal(item.derivation.result)}
+    return numbers_in(item.excerpt)
+
+
+def run_calculation(spec: CalculationSpec, known_evidence_ids: set[str], evidence: dict[str, EvidenceItem] | None = None) -> Derivation:
+    """Executa o calculo. Com `evidence`, cada valor precisa aparecer em ao menos uma evidencia citada (nao basta um ID valido)."""
     fn = FUNCTIONS.get(spec.function)
     if fn is None:
         raise CalculationError(f"funcao desconhecida: {spec.function}. Permitidas: {', '.join(sorted(FUNCTIONS))}")
@@ -132,7 +175,16 @@ def run_calculation(spec: CalculationSpec, known_evidence_ids: set[str]) -> Deri
     unsupported = [i.name for i in spec.inputs if not i.evidence_ids]
     if unsupported:
         raise CalculationError(f"entradas sem evidencia de origem: {', '.join(unsupported)}")
+    if evidence is not None:
+        mismatched = [
+            f"{i.name}={i.value}" for i in spec.inputs
+            if not any(Decimal(i.value) in _supported_values(evidence[e]) for e in i.evidence_ids if e in evidence)
+        ]
+        if mismatched:
+            raise CalculationError(f"valores nao encontrados nas evidencias citadas: {', '.join(mismatched)}")
     values = {i.name: Decimal(i.value) for i in spec.inputs}
+    if (fn_need := _REQUIRED.get(spec.function)) and (absent := [n for n in fn_need if n not in values]):
+        raise MissingInputError(f"informacao ausente para {spec.function}: {', '.join(absent)}")
     if any(abs(v) > MAX_ABS for v in values.values()):
         raise CalculationError("entrada fora da faixa suportada")
     try:
