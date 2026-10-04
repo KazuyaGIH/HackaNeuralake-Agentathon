@@ -1,0 +1,6 @@
+[01:35:30] battery-S1-B-r1-1be5c4 ok=True wall=83.11s spend_total_public=$0.0093 
+[01:36:43] battery-S1-C-r1-2d5e5d ok=True wall=72.59s spend_total_public=$0.0255 
+[01:39:31] battery-I1-C-r1-e89d36 ok=True wall=168.25s spend_total_public=$0.0545 
+[01:40:13] battery-I1-B-r1-89e3ae ok=True wall=42.15s spend_total_public=$0.0643 
+[01:41:18] battery-X1-B-r1-0ccf5a ok=True wall=64.48s spend_total_public=$0.0731 
+[01:43:05] battery-X1-C-r1-508bbf ok=True wall=107.13s spend_total_public=$0.0963 
