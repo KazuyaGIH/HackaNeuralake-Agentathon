@@ -124,8 +124,8 @@ class MockAdapter:
         is_max = constraint["kind"] == "numeric_max"
         best: tuple[Decimal, str] | None = None
         for item in self._evidence(md):
-            if item.get("type") != "source_claim":
-                continue
+            if item.get("type") != "source_claim" or item["evidence_id"].startswith("ev-brief-rst-"):
+                continue  # o limite da restricao nao comprova a metrica
             for n in _numbers(item["excerpt"]):
                 if n <= 0:
                     continue

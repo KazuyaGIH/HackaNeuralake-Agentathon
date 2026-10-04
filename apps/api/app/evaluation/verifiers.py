@@ -49,7 +49,8 @@ def _metric_supported(value: Decimal, evidence_ids: list[str], pack: EvidencePac
         if item.type == EvidenceType.DERIVED_CALCULATION and item.derivation is not None:
             if item.derivation.result == value:
                 return True, f"comprovado pelo cálculo {eid}"
-        elif item.type == EvidenceType.SOURCE_CLAIM:
+        elif item.type == EvidenceType.SOURCE_CLAIM and not item.provenance.startswith("challenge:constraint:"):
+            # o limite de uma restricao e a meta, nao comprova o valor da proposta
             if value in _numbers_in(item.excerpt):
                 return True, f"comprovado pelo trecho {eid}"
     return False, "nenhuma evidência citada comprova o valor declarado"

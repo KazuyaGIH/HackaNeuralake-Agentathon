@@ -83,6 +83,17 @@ def test_dado_ausente_vira_pendencia():
         _run(CalculationSpec(function="divide", unit="BRL", inputs=[_in("numerator", "18500", "ev-brief-obj-001")]), pack)
 
 
+def test_verificador_aceita_enunciado_e_calculo_mas_nao_o_limite_da_regra():
+    from app.evaluation.verifiers import _metric_supported
+    pack = _pack()
+    d = _run(CalculationSpec(function="multiply", unit="BRL", inputs=[_in("m", "18500", "ev-brief-obj-001"), _in("n", "12", "ev-brief-obj-001")]), pack)
+    item = EvidenceItem(evidence_id="drv-c1-t1", type=EvidenceType.DERIVED_CALCULATION, excerpt="x", provenance="specialist:calculation:c1:t1", derivation=d)
+    frozen = freeze_with_derivations(pack, [item], [])
+    assert _metric_supported(Decimal("222000"), ["drv-c1-t1"], frozen)[0]
+    assert _metric_supported(Decimal("18500"), ["ev-brief-obj-001"], frozen)[0]
+    assert not _metric_supported(Decimal("15000"), ["ev-brief-rst-custo-max"], frozen)[0]
+
+
 def test_resultado_calculado_e_citavel_por_outro_calculo():
     pack = _pack()
     d = _run(CalculationSpec(function="multiply", unit="BRL", inputs=[_in("m", "18500", "ev-brief-obj-001"), _in("n", "12", "ev-brief-obj-001")]), pack)
