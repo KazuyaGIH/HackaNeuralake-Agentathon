@@ -39,7 +39,8 @@ outro agente use a plataforma sem tela (relacionado à frente 04).
 
 | Área | Situação |
 |---|---|
-| Fluxo completo ponta a ponta (evidências → pensantes → delegação → barreira única de sincronização → propostas → crítica em anel → revisão → verificadores → juízes anônimos → ranking → relatório) | **Pronto e testado** (77 testes automatizados; `scripts/smoke_mock.py`; cliente agente; smoke de UI com Playwright). |
+| Fluxo completo ponta a ponta (evidências → pensantes → delegação → barreira única de sincronização → propostas → crítica em anel → revisão → verificadores → juízes anônimos → ranking → relatório) | **Pronto e testado** (92 testes automatizados; `scripts/smoke_mock.py`; cliente agente; smoke de UI com Playwright). |
+| Calculadora com proveniência (enunciado/contexto/restrições citáveis como `ev-brief-*`; valor precisa constar no trecho citado; catálogo exato de funções no planejador; validação antes de executar; 1 reparo de plano) e proteção da revisão (revisão que passa a violar regra obrigatória comprovada é rejeitada) | **Implementadas e testadas** (03/10/2026, commit `a54bf3a`, publicado). Com o modelo NeuraLake `text`, a maioria dos pedidos de cálculo ainda falha por especificação errada da IA: 5 de 26 concluídos na bateria preliminar ([`RELATORIO_CORRECOES_RETESTE.md`](RELATORIO_CORRECOES_RETESTE.md)). |
 | API completa (catálogo, fontes, runs, SSE com reconexão, cancelamento, relatório JSON/Markdown, retry, refine, action-plan, OpenAPI) | **Pronta e testada.** |
 | Controles críticos: reserva atômica de orçamento, limites de chamadas/tempo/tentativas, idempotência, `interrupted` em reinício, cancelamento honesto, autorização por proprietário, isolamento do Judge, sanitização de eventos | **Prontos e testados** (seção "Critérios de aceite" abaixo). |
 | Interface Next.js (projetos, configurar, arena ao vivo, comparar, repescagem, plano de ação, exportar) | **Pronta** e publicada no Render. |
@@ -48,9 +49,9 @@ outro agente use a plataforma sem tela (relacionado à frente 04).
 | Docker Compose | Arquivos prontos; **não verificados** localmente (o deploy no Render usa o `Dockerfile` da API). |
 | Cross Memory (NeuraLake), baseline de agente único, ledger de créditos, protocolo A2A/MCP | **Não implementados** (futuro). |
 
-**Benchmark (03/10/2026):** arena × agente único × agente único com autorrevisão, 54 execuções reais na NeuraLake com
-gabarito e avaliador externo. Resultado, metodologia e dados em
-[`RELATORIO_BENCHMARK_AGENTATHON.md`](RELATORIO_BENCHMARK_AGENTATHON.md).
+**Medições (03/10/2026, NeuraLake `text`):**
+- [`RELATORIO_BENCHMARK_AGENTATHON.md`](RELATORIO_BENCHMARK_AGENTATHON.md): benchmark com 54 execuções reais, comparando arena, agente único e agente único com autorrevisão. Teve gabarito e avaliador externo. Foi medido **antes** das correções da calculadora (commit `c4f6a07`). Resultado: a arena custou de 2 a 4 vezes mais e não melhorou as entregas.
+- [`RELATORIO_CORRECOES_RETESTE.md`](RELATORIO_CORRECOES_RETESTE.md): correções da calculadora e da revisão, mais uma bateria preliminar de 6 execuções **depois** das correções (`a54bf3a`). Resultado: agente único com 2/3 entregas aprovadas, arena com 1/3, e a arena gastou cerca de 2× os tokens. O benchmark completo ainda não foi repetido com as correções.
 
 Tudo que é simulado leva o selo **SIMULADO** (no conteúdo do mock, no relatório, na UI e no Markdown). Custos em modo
 simulado usam uma tabela de preços fictícia (`mock-prices-v1`) e não comprovam a integração real.
@@ -145,7 +146,7 @@ crítica cruzada habilitada também com `auto`, pensamento "low" e espaço extra
 ## Testes e verificação
 
 ```powershell
-.venv\Scripts\python.exe -m pytest -q                 # 77 testes (unitários, orçamento, fluxo, controles de API, provedores sem rede)
+.venv\Scripts\python.exe -m pytest -q                 # 92 testes (unitários, orçamento, fluxo, controles de API, provedores sem rede, calculadora/proveniência, revisão)
 cd apps/web; npm run typecheck; npm run build         # tipos gerados + build de produção
 node scripts/ui_smoke.mjs http://127.0.0.1:3000       # smoke de UI (requer playwright + chromium instalados)
 .venv\Scripts\python.exe scripts/smoke_mock.py        # fluxo simulado in-process com saída do relatório
@@ -260,10 +261,19 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
   reavaliar ninguém. `DELETE /runs/{id}` exclui uma execução encerrada. Nomes das arenas ficam no projeto (navegador).
 - **Especialista de cálculo** não usa inferência: o pensante pede a função tipada e o coordenador executa em código
   (`sum, subtract, multiply, divide, percent_of, percent_change, annual_from_monthly, monthly_from_annual, tco, min, max,
-  average, per_unit`), exigindo entradas com `evidence_ids` existentes. A pesquisa documental usa recuperação lexical
-  determinística sobre o pacote + uma chamada de resumo estruturado.
+  average, per_unit`).
+  - **Origem das entradas:** cada entrada precisa citar uma evidência existente **cujo trecho contenha o valor**, ou ser o
+    resultado de uma derivação citada. O objetivo, o contexto e as restrições entram no pacote como evidências
+    `ev-brief-*`. Uma constante sem ID só é aceita se aparecer literalmente no texto do cliente.
+  - **Planejamento:** o planejador recebe o catálogo exato de funções e nomes de entrada. Os pedidos são validados antes
+    da execução, com no máximo 1 reparo de plano (`plan_repair`, contado no orçamento).
+  - **Erros:** dado ausente vira pendência (lacuna no relatório); entrada inválida vira falha.
+  - **Pesquisa documental:** usa recuperação lexical determinística sobre o pacote + uma chamada de resumo estruturado.
 - **Verificação objetiva**: uma métrica declarada só vale como prova se citar uma derivação com o mesmo resultado ou um
-  trecho de fonte que contenha o número; caso contrário o resultado é `unknown` (pendente).
+  trecho de fonte que contenha o número; caso contrário o resultado é `unknown` (pendente). O trecho de uma restrição
+  (o limite) não comprova a métrica.
+- **Proteção da revisão**: uma revisão que passa a violar uma regra obrigatória que a versão anterior cumpria, com
+  prova, é rejeitada. A versão válida é mantida e a rejeição fica registrada.
 - **Preços NeuraLake** vêm da página pública (30/09/2026) rotulados como estimativa; a tabela é versionada e o snapshot
   registra `prices_version`. `auto` reserva pelo teto das capacidades e concilia pelo uso informado.
 - **Idempotência**: replay com a mesma chave/payload devolve `200` com `created=false` (a criação devolve `202`).
@@ -292,6 +302,12 @@ lógica, 32 chamadas por execução, 300 s por execução, 60 s por chamada. Rub
 ## Pendências e limitações conhecidas
 
 - OpenAI, Gemini e Claude ainda não testados com chave real (somente NeuraLake).
+- Com o modelo NeuraLake `text`:
+  - a IA ainda especifica mal a maioria dos cálculos (função ou nomes de entrada errados);
+  - as arenas reais costumam terminar "inconclusivas", porque as métricas ficam sem prova;
+  - a calculadora valida a origem dos números, não o sentido do cálculo.
+- A tela publicada ainda não foi testada com uma arena real depois do commit `a54bf3a`. A API publicada foi conferida com uma arena simulada.
+- O teste `test_sse_reconnect_resumes_without_duplicates_or_new_calls` falhou uma vez de forma intermitente (tempo/SSE) e passou nas repetições.
 - Demo pública no plano gratuito do Render: servidor dorme sem uso e o histórico de arenas não é permanente.
 - Docker Compose não executado nesta máquina.
 - Sem OCR; PDFs digitalizados são rejeitados com explicação.

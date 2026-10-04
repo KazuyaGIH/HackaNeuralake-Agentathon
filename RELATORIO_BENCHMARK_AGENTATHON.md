@@ -2,6 +2,17 @@
 
 Data das execuções: 03/10/2026 (madrugada, horário de Brasília). Provedor: somente NeuraLake. Repositório: `KazuyaGIH/HackaNeuralake-Agentathon`, sem nenhuma alteração na arquitetura durante a medição.
 
+> **Versão medida e o que mudou depois.** Este benchmark mediu o código do commit `c4f6a07`.
+>
+> Na noite de 03/10, o commit `a54bf3a` (publicado) aplicou parte das recomendações da seção 9:
+> - a calculadora passou a aceitar como evidência os números do enunciado e das restrições (`ev-brief-*`);
+> - o planejador passou a receber o catálogo exato de funções, com validação e reparo do pedido;
+> - uma revisão que passa a violar uma regra obrigatória comprovada passou a ser rejeitada.
+>
+> **Este benchmark não foi repetido com essas correções.** Os números abaixo valem para `c4f6a07`. Depois das correções houve só uma bateria preliminar de 6 execuções, descrita em [`RELATORIO_CORRECOES_RETESTE.md`](RELATORIO_CORRECOES_RETESTE.md): agente único com 2/3 aprovadas, arena com 1/3, e a arena com cerca de 2× os tokens. Ela aponta na mesma direção, mas é pequena demais para conclusões.
+>
+> Os arquivos do harness citados no Apêndice G têm uma versão adaptada às correções na pasta `bench/` do repositório.
+
 ## 1. Veredito
 
 **Com o modelo fixo `text` da NeuraLake, a divisão em agentes não valeu a pena.** Pela regra de decisão definida antes das execuções (Apêndice C), o resultado é **"não valeu"** para C × B:

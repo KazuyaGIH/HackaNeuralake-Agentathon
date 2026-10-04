@@ -2,7 +2,7 @@
 
 Versão 1.0 · 30/09/2026 · Especificação original de produto e implementação.
 
-**Status (03/10/2026):** MVP **implementado** a partir desta especificação e publicado em https://agentathon-k5h2.onrender.com. O estado atual, as funcionalidades adicionadas depois (projetos, painel de juízes, modelo econômico por equipe, repescagem, plano de ação, NeuraLake/OpenAI/Gemini/Claude com chaves pelo site) e os desvios registrados estão no [`README.md`](README.md). Itens marcados como P1/Futuro abaixo continuam não implementados, exceto o segundo provedor de inferência. As seções 1 e 17 preservam as instruções originais de desenvolvimento.
+**Status (03/10/2026):** MVP **implementado** a partir desta especificação e publicado em https://agentathon-k5h2.onrender.com. O estado atual, as funcionalidades adicionadas depois (projetos, painel de juízes, modelo econômico por equipe, repescagem, plano de ação, NeuraLake/OpenAI/Gemini/Claude com chaves pelo site, calculadora com proveniência do enunciado `ev-brief-*` e proteção da revisão) e os desvios registrados estão no [`README.md`](README.md). As medições de custo e qualidade estão em [`RELATORIO_BENCHMARK_AGENTATHON.md`](RELATORIO_BENCHMARK_AGENTATHON.md) e [`RELATORIO_CORRECOES_RETESTE.md`](RELATORIO_CORRECOES_RETESTE.md). Itens marcados como P1/Futuro abaixo continuam não implementados, exceto o segundo provedor de inferência. As seções 1 e 17 preservam as instruções originais de desenvolvimento.
 
 ## 1. Instrução de execução (original, para o agente de desenvolvimento)
 
