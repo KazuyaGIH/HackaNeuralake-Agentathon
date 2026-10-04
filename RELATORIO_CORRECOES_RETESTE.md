@@ -75,6 +75,24 @@ Cálculos pedidos pelo modelo e o que a calculadora fez:
 - Benchmark completo não repetido (fora do escopo de hoje).
 - Gasto real hoje: 2 arenas, cerca de US$ 0,021 pela tabela do repositório.
 
+## 7b. Integração com o trabalho do Devin (03/10, 21h49–21h55)
+
+- A branch do Devin (`origin/devin/revisao-ranking-guardrails`, `58264fd` + `6ef6ee9`) já estava no GitHub desde cerca de 20h57. Não percebi isso durante a primeira sessão; as seções acima dizem "não recebido", o que estava errado.
+- Branch de integração (local, não enviada): `integracao/calc-revisao`, pasta `C:\Users\gugak\Agentathon-integ`. Merge `848dbd2` = `cb48f87` (calculadora) + `6ef6ee9` (Devin) + este relatório.
+- Conflito: só no bloco de imports de `phases.py` (as duas partes acrescentaram nomes). Resolvido mantendo os dois. Nenhuma outra mudança de código.
+- Testes: `pytest -q` → **92 passed** (88 meus + 4 do Devin). `scripts\smoke_mock.py` → completou (exit 0).
+- **Arena real na integração:** `run_429b68ba5acc4b34`, NeuraLake `text`, mesmo desafio e configuração da seção 5, mas **com 1 rodada de crítica** (teto de 14 chamadas).
+  - Resultado: completed, ranked, vencedora relativa Alfa.
+  - 10 chamadas: 2 de plano, 2 de proposta, 2 de crítica, 3 de revisão e 1 de juiz. Uma revisão veio com `schema_invalid` e foi refeita; o reparo está contado.
+  - Tokens: 35.832 de entrada e 4.942 de saída. Custo US$ 0,0216 pela tabela do repositório. Cerca de 108 s.
+  - Cálculos: **0 de 4**.
+    - 2 usaram a função inexistente `less_than_or_equal`;
+    - 1 teve nome de entrada inválido;
+    - 1 usou "12" citando um trecho que diz "120 dias". A recusa está correta.
+    - Os IDs `ev-brief-rst-*` foram citados com os valores certos.
+  - Revisão (Devin): **nenhuma revisão foi rejeitada**, porque as versões 2 continuaram cumprindo as regras. A proteção não foi acionada neste teste real; ela só está coberta pelos 4 testes automáticos.
+  - As métricas finais foram comprovadas por trecho de documento (`ev-568295-005`), não por cálculo. Não há gabarito para dizer se a recomendação está correta.
+
 ## 8. Como executar a demonstração
 
 ```powershell
