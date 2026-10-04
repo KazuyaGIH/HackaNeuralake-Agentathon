@@ -35,7 +35,7 @@ from app.contracts.challenge import CandidateConfig, JudgeConfig
 from app.contracts.common import CostQuality, DecisionStatus, EvidenceType, RunStatus, SpecialistKind
 from app.evaluation.judge import JudgeOutputError, anonymize, judge_criteria, parse_judge_output
 from app.evaluation.ranking import CandidateInput, PanelJudge, compute_ranking
-from app.evaluation.verifiers import verify_proposal
+from app.evaluation.verifiers import accept_revision, verify_proposal
 from app.evidence.calc import CalculationError, MissingInputError, resolve_brief_refs, run_calculation
 from app.evidence.pack import BRIEF_PROVENANCE, SourceText, brief_items, build_pack, freeze_with_derivations
 from app.evidence.retrieval import retrieve
@@ -323,6 +323,13 @@ async def _propose_one(ctx: RunContext, cid: str, critique: Critique | None, fee
         return
     proposal = _sanitize_proposal(ctx, cid, out, version, revised=critique is not None, call_ids=call_ids)
     proposal.revised_from_feedback = feedback is not None
+    if revising and previous is not None:
+        kept, rejected = accept_revision(previous, proposal, ctx.snapshot.constraints, ctx.pack)
+        if rejected:
+            await ctx.save_artifact("proposal_rejected", proposal, candidate_id=cid, version=version)
+            ctx.operational_changes.append(f"{cand.name}: revisao v{version} rejeitada ({'; '.join(rejected)}); mantida a versao {previous.version}")
+            await ctx.emit("proposal.revision_rejected", {"candidate_id": cid, "version": version, "kept_version": previous.version, "reasons": rejected})
+            return
     ctx.proposals[cid] = proposal
     await ctx.save_artifact("proposal", proposal, candidate_id=cid, version=version)
     await ctx.emit("proposal.ready", {"candidate_id": cid, "version": version, "title": proposal.title, "invalid_evidence_ids": proposal.invalid_evidence_ids,

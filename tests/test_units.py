@@ -242,3 +242,64 @@ def test_challenge_config_validation() -> None:
         Constraint(constraint_id="c", description="d", kind="numeric_max")
     cfg = ChallengeConfig(objective="Escolher a melhor opcao", candidate_count=4)
     assert cfg.rubric.criteria[0].weight == Decimal(30)
+
+
+# ------------------------------------------------------------------ revisao: regressao nao substitui a original
+
+
+def _cost_constraint() -> Constraint:
+    return Constraint(constraint_id="custo", description="d", kind="numeric_max", metric_key="monthly_cost_brl", limit=Decimal(8000), unit="BRL")
+
+
+def _versioned(value: int | None, evidence_id: str | None, version: int) -> Proposal:
+    metrics = {"monthly_cost_brl": ProposalMetric(value=Decimal(value), unit="BRL", evidence_ids=[evidence_id] if evidence_id else [])} if value is not None else {}
+    return Proposal(title="t", recommendation="r", metrics=metrics, evidence_ids=[evidence_id] if evidence_id else [], candidate_id="c1", version=version)
+
+
+def test_revision_with_verified_regression_keeps_original() -> None:
+    from app.evaluation.verifiers import accept_revision, revision_regressions
+
+    pack = _pack()
+    ids = [i.evidence_id for i in pack.items]
+    original = _versioned(6500, ids[0], 1)   # R$ 6.500 comprovado, dentro do teto
+    revised = _versioned(9800, ids[2], 2)    # R$ 9.800 comprovado, acima do teto
+    kept, reasons = accept_revision(original, revised, [_cost_constraint()], pack)
+    assert kept is original and kept.version == 1
+    assert reasons and "custo" in reasons[0]
+    assert revision_regressions(verify_proposal(original, [_cost_constraint()], pack), verify_proposal(revised, [_cost_constraint()], pack))
+
+
+def test_revision_fixing_invalid_original_is_accepted() -> None:
+    from app.evaluation.verifiers import accept_revision
+
+    pack = _pack()
+    ids = [i.evidence_id for i in pack.items]
+    original = _versioned(9800, ids[2], 1)   # inelegivel
+    revised = _versioned(6500, ids[0], 2)    # elegivel
+    kept, reasons = accept_revision(original, revised, [_cost_constraint()], pack)
+    assert kept is revised and reasons == []
+
+
+def test_revision_losing_proof_is_pending_not_rejected() -> None:
+    """Ausencia de prova na revisao nao e tratada como erro comprovado: a revisao segue, mas fica pendente."""
+    from app.evaluation.verifiers import accept_revision
+
+    pack = _pack()
+    ids = [i.evidence_id for i in pack.items]
+    original = _versioned(6500, ids[0], 1)
+    revised = _versioned(None, None, 2)
+    kept, reasons = accept_revision(original, revised, [_cost_constraint()], pack)
+    assert kept is revised and reasons == []
+    assert verify_proposal(kept, [_cost_constraint()], pack).eligibility == Eligibility.PENDING
+
+
+def test_no_validated_candidate_is_inconclusive_with_reasons() -> None:
+    res = compute_ranking(RUBRIC, [
+        CandidateInput("c1", "A", 1, _ver("c1", Eligibility.INELIGIBLE), _eval("c1", 10), Decimal("0.01"), Decimal("1"), CostQuality.ESTIMATED),
+        CandidateInput("c2", "B", 1, _ver("c2", Eligibility.PENDING), _eval("c2", 9), Decimal("0.01"), Decimal("1"), CostQuality.ESTIMATED),
+    ])
+    assert res.decision_status == DecisionStatus.INCONCLUSIVE and res.winner_candidate_id is None
+    assert any("pendentes" in r for r in res.reasons)
+    # ranking provisorio continua existindo (pendente antes de inelegivel), sem vencedor oficial
+    ranks = {e.candidate_id: e.rank for e in res.entries}
+    assert ranks["c2"] == 1 and ranks["c1"] == 2
