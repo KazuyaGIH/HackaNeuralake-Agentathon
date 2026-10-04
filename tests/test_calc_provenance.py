@@ -77,6 +77,27 @@ def test_referencia_inexistente_e_sem_origem_rejeitadas():
         _run(CalculationSpec(function="sum", unit="x", inputs=[_in("a", "12")]), pack)
 
 
+def test_servidor_resolve_constante_do_enunciado_sem_id_mas_nao_valor_inventado():
+    from app.evidence.calc import resolve_brief_refs
+    pack = _pack()
+    brief = [i for i in pack.items if i.provenance.startswith("challenge:")]
+    spec = CalculationSpec(function="tco", unit="BRL", inputs=[_in("setup", "3", "ev-brief-obj-001"), _in("monthly", "18500", "ev-brief-obj-001"), _in("months", "12")])
+    spec2, resolved = resolve_brief_refs(spec, brief)
+    assert resolved == ["months=12<-ev-brief-obj-001"]
+    assert _run(spec2, pack).result == Decimal("222003")
+    bad, resolved_bad = resolve_brief_refs(CalculationSpec(function="sum", unit="x", inputs=[_in("a", "37")]), brief)
+    assert resolved_bad == []
+    with pytest.raises(CalculationError, match="sem evidencia"):
+        _run(bad, pack)
+
+
+def test_nome_de_entrada_errado_e_invalido_nao_pendencia():
+    pack = _pack()
+    with pytest.raises(CalculationError, match="nomes de entrada invalidos") as exc:
+        _run(CalculationSpec(function="monthly_from_annual", unit="BRL", inputs=[_in("custo", "18500", "ev-brief-obj-001")]), pack)
+    assert not isinstance(exc.value, MissingInputError)
+
+
 def test_dado_ausente_vira_pendencia():
     pack = _pack()
     with pytest.raises(MissingInputError, match="denominator"):

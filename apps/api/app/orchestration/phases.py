@@ -36,8 +36,8 @@ from app.contracts.common import CostQuality, DecisionStatus, EvidenceType, RunS
 from app.evaluation.judge import JudgeOutputError, anonymize, judge_criteria, parse_judge_output
 from app.evaluation.ranking import CandidateInput, PanelJudge, compute_ranking
 from app.evaluation.verifiers import verify_proposal
-from app.evidence.calc import CalculationError, MissingInputError, run_calculation
-from app.evidence.pack import SourceText, brief_items, build_pack, freeze_with_derivations
+from app.evidence.calc import CalculationError, MissingInputError, resolve_brief_refs, run_calculation
+from app.evidence.pack import BRIEF_PROVENANCE, SourceText, brief_items, build_pack, freeze_with_derivations
 from app.evidence.retrieval import retrieve
 from app.orchestration.coordinator import CallDenied, CallFailed, RunContext
 from app.storage.models import Source
@@ -217,8 +217,12 @@ async def _run_task(ctx: RunContext, cid: str, t: SpecialistTask, known: set[str
     cand = ctx.candidate(cid)
     if t.kind == SpecialistKind.CALCULATION:
         assert t.calculation is not None
+        assert ctx.pack is not None
+        spec, resolved = resolve_brief_refs(t.calculation, [i for i in ctx.pack.items if i.provenance.startswith(BRIEF_PROVENANCE + ":")])
+        if resolved:
+            ctx.operational_changes.append(f"{cand.name}, calculo {t.task_id}: origem no enunciado atribuida pelo servidor ({'; '.join(resolved)})")
         try:
-            d = run_calculation(t.calculation, known, {i.evidence_id: i for i in ctx.pack.items} if ctx.pack else None)
+            d = run_calculation(spec, known, {i.evidence_id: i for i in ctx.pack.items})
         except MissingInputError as exc:
             return TaskResult(task_id=t.task_id, candidate_id=cid, kind=SpecialistKind.CALCULATION, status="skipped", error=f"pendencia: {exc}")
         except CalculationError as exc:

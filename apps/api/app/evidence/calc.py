@@ -161,6 +161,21 @@ def _supported_values(item: EvidenceItem) -> set[Decimal]:
     return numbers_in(item.excerpt)
 
 
+def resolve_brief_refs(spec: CalculationSpec, brief: list[EvidenceItem]) -> tuple[CalculationSpec, list[str]]:
+    """Entrada sem evidence_ids cujo valor aparece literalmente no enunciado/contexto/restricoes recebe a referencia desse
+    trecho (dado fornecido pelo cliente). Valores que nao aparecem continuam sem origem e serao rejeitados."""
+    resolved: list[str] = []
+    inputs = []
+    for i in spec.inputs:
+        if not i.evidence_ids:
+            hits = [b.evidence_id for b in brief if Decimal(i.value) in numbers_in(b.excerpt)]
+            if hits:
+                i = i.model_copy(update={"evidence_ids": hits[:1]})
+                resolved.append(f"{i.name}={i.value}<-{hits[0]}")
+        inputs.append(i)
+    return spec.model_copy(update={"inputs": inputs}), resolved
+
+
 def run_calculation(spec: CalculationSpec, known_evidence_ids: set[str], evidence: dict[str, EvidenceItem] | None = None) -> Derivation:
     """Executa o calculo. Com `evidence`, cada valor precisa aparecer em ao menos uma evidencia citada (nao basta um ID valido)."""
     fn = FUNCTIONS.get(spec.function)
@@ -183,8 +198,11 @@ def run_calculation(spec: CalculationSpec, known_evidence_ids: set[str], evidenc
         if mismatched:
             raise CalculationError(f"valores nao encontrados nas evidencias citadas: {', '.join(mismatched)}")
     values = {i.name: Decimal(i.value) for i in spec.inputs}
-    if (fn_need := _REQUIRED.get(spec.function)) and (absent := [n for n in fn_need if n not in values]):
-        raise MissingInputError(f"informacao ausente para {spec.function}: {', '.join(absent)}")
+    if fn_need := _REQUIRED.get(spec.function):
+        if unknown := [n for n in values if n not in fn_need]:
+            raise CalculationError(f"nomes de entrada invalidos para {spec.function}: {', '.join(unknown)} (esperado: {', '.join(fn_need)})")
+        if absent := [n for n in fn_need if n not in values]:
+            raise MissingInputError(f"informacao ausente para {spec.function}: {', '.join(absent)}")
     if any(abs(v) > MAX_ABS for v in values.values()):
         raise CalculationError("entrada fora da faixa suportada")
     try:
